@@ -867,10 +867,14 @@
     function animateDoors(dt) {
       const now = performance.now();
       for (const door of doors) {
-        // Auto-close after timeout
+        // Auto-close after timeout (only if player is not underneath)
         if (door.open && door.slideY >= WALL_H && now - door.openTime > DOOR_OPEN_DURATION) {
-          door.open = false;
-          maze[door.r][door.c] = 4; // restore collision
+          const pc = Math.floor(camera.position.x / CELL);
+          const pr = Math.floor(camera.position.z / CELL);
+          if (pc !== door.c || pr !== door.r) {
+            door.open = false;
+            maze[door.r][door.c] = 4; // restore collision
+          }
         }
 
         if (door.open) {
