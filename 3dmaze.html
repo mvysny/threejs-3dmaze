@@ -81,6 +81,7 @@
       <p>WASD to move</p>
       <p>Arrow keys to look around</p>
       <p>M to toggle minimap</p>
+      <p>SPACE to open doors</p>
       <p>Find the <span style="color:#4f4">GREEN EXIT</span> to escape!</p>
       <p class="start">Press SPACE or click to start</p>
     </div>
@@ -337,6 +338,67 @@
       ctx.strokeRect(10, 10, w - 20, h - 20);
     });
 
+    // Iron bar portcullis
+    const texPortcullis = createTexture(128, 128, (ctx, w, h) => {
+      // Dark background (gaps between bars)
+      ctx.fillStyle = '#050508';
+      ctx.fillRect(0, 0, w, h);
+      // Vertical bars - thick, bright iron
+      const barW = 10, barSpacing = 22;
+      for (let x = barSpacing / 2; x < w; x += barSpacing) {
+        const grad = ctx.createLinearGradient(x - barW / 2, 0, x + barW / 2, 0);
+        grad.addColorStop(0, '#505058');
+        grad.addColorStop(0.2, '#9090a0');
+        grad.addColorStop(0.45, '#c0c0d0');
+        grad.addColorStop(0.55, '#d0d0e0');
+        grad.addColorStop(0.8, '#9090a0');
+        grad.addColorStop(1, '#505058');
+        ctx.fillStyle = grad;
+        ctx.fillRect(x - barW / 2, 0, barW, h);
+      }
+      // Horizontal crossbars
+      const crossH = 8, crossSpacing = 32;
+      for (let y = crossSpacing; y < h; y += crossSpacing) {
+        const grad = ctx.createLinearGradient(0, y - crossH / 2, 0, y + crossH / 2);
+        grad.addColorStop(0, '#505058');
+        grad.addColorStop(0.2, '#8888a0');
+        grad.addColorStop(0.5, '#b0b0c8');
+        grad.addColorStop(0.8, '#8888a0');
+        grad.addColorStop(1, '#505058');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, y - crossH / 2, w, crossH);
+      }
+      // Rivets at intersections
+      for (let x = barSpacing / 2; x < w; x += barSpacing) {
+        for (let y = crossSpacing; y < h; y += crossSpacing) {
+          ctx.fillStyle = '#e0e0f0';
+          ctx.beginPath();
+          ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(x - 1, y - 1, 1.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      // Bottom spikes
+      for (let x = barSpacing / 2; x < w; x += barSpacing) {
+        ctx.fillStyle = '#9090a0';
+        ctx.beginPath();
+        ctx.moveTo(x - 6, h);
+        ctx.lineTo(x, h - 14);
+        ctx.lineTo(x + 6, h);
+        ctx.fill();
+        ctx.fillStyle = '#c0c0d0';
+        ctx.beginPath();
+        ctx.moveTo(x - 2, h);
+        ctx.lineTo(x, h - 12);
+        ctx.lineTo(x + 2, h);
+        ctx.fill();
+      }
+      addNoise(ctx, w, h, 0.04);
+    });
+
     const wallTextures = [texStoneBrick, texRedBrick, texDarkStone, texMossyStone, texWood, texMetal];
 
     // ==================== MAZE GENERATION ====================
@@ -353,6 +415,7 @@
     }
 
     // Recursive backtracker
+    const passageCells = [];
     function carveMaze() {
       const stack = [];
       const startR = 1, startC = 1;
@@ -372,8 +435,11 @@
         }
 
         const [dr, dc] = dirs[Math.floor(Math.random() * dirs.length)];
-        maze[r + dr / 2][c + dc / 2] = 0; // carve between
+        const betweenR = r + dr / 2, betweenC = c + dc / 2;
+        maze[betweenR][betweenC] = 0; // carve between
         maze[r + dr][c + dc] = 0;
+        // Record passage cells as potential door locations
+        passageCells.push({ r: betweenR, c: betweenC, vertical: dr !== 0 });
         stack.push([r + dr, c + dc]);
       }
 
@@ -405,6 +471,18 @@
     }
 
     carveMaze();
+
+    // ==================== DOORS ====================
+
+    // Pick random passage cells as door locations (~30%)
+    const doorCells = passageCells
+      .filter(() => Math.random() < 0.3)
+      .filter(d => !(d.r === 1 && d.c === 1)); // don't block start
+
+    // Mark door cells as blocked (value 4 = closed door)
+    for (const d of doorCells) {
+      maze[d.r][d.c] = 4;
+    }
 
     // Assign a random texture index to each wall cell for variety
     const wallTextureMap = [];
@@ -575,6 +653,23 @@
     }
     placeExitSigns();
 
+    // Build door meshes (portcullis style)
+    const doors = [];
+    const doorMat = new THREE.MeshStandardMaterial({ map: texPortcullis, roughness: 0.4, metalness: 0.7 });
+    for (const d of doorCells) {
+      const x = d.c * CELL + CELL / 2;
+      const z = d.r * CELL + CELL / 2;
+      const doorGeo = new THREE.BoxGeometry(
+        d.vertical ? CELL : 0.15,
+        WALL_H,
+        d.vertical ? 0.15 : CELL
+      );
+      const mesh = new THREE.Mesh(doorGeo, doorMat);
+      mesh.position.set(x, WALL_H / 2, z);
+      scene.add(mesh);
+      doors.push({ mesh, r: d.r, c: d.c, vertical: d.vertical, open: false, slideY: 0 });
+    }
+
     // Torch lights scattered through maze
     const torchPositions = [];
     for (let r = 1; r < MAZE_H - 1; r += 4) {
@@ -605,6 +700,8 @@
         for (let c = 0; c < MAZE_W; c++) {
           if (maze[r][c] === 1) {
             mmCtx.fillStyle = '#444';
+          } else if (maze[r][c] === 4) {
+            mmCtx.fillStyle = '#864';
           } else if (maze[r][c] === 3) {
             mmCtx.fillStyle = '#0f0';
           } else {
@@ -649,7 +746,10 @@
 
     document.addEventListener('keydown', e => {
       keys[e.code] = true;
-      if (e.code === 'Space') startGame();
+      if (e.code === 'Space') {
+        if (!gameStarted) startGame();
+        else tryOpenDoor();
+      }
       if (e.code === 'KeyM') {
         minimapCanvas.style.display = minimapCanvas.style.display === 'none' ? 'block' : 'none';
       }
@@ -665,7 +765,7 @@
       const c = Math.floor(wx / CELL);
       const r = Math.floor(wz / CELL);
       if (r < 0 || r >= MAZE_H || c < 0 || c >= MAZE_W) return true;
-      return maze[r][c] === 1;
+      return maze[r][c] === 1 || maze[r][c] === 4; // walls and closed doors
     }
 
     function canMove(x, z) {
@@ -740,6 +840,56 @@
       document.exitPointerLock();
     }
 
+    // ==================== DOOR INTERACTION ====================
+
+    function tryOpenDoor() {
+      if (!gameStarted || gameWon) return;
+      const px = camera.position.x;
+      const pz = camera.position.z;
+      const interactDist = CELL * 1.8;
+
+      for (const door of doors) {
+        if (door.open) continue;
+        const dx = (door.c * CELL + CELL / 2) - px;
+        const dz = (door.r * CELL + CELL / 2) - pz;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist < interactDist) {
+          door.open = true;
+          door.openTime = performance.now();
+          maze[door.r][door.c] = 0; // remove collision
+          return;
+        }
+      }
+    }
+
+    const DOOR_OPEN_DURATION = 3000; // ms before auto-close
+
+    function animateDoors(dt) {
+      const now = performance.now();
+      for (const door of doors) {
+        // Auto-close after timeout
+        if (door.open && door.slideY >= WALL_H && now - door.openTime > DOOR_OPEN_DURATION) {
+          door.open = false;
+          maze[door.r][door.c] = 4; // restore collision
+        }
+
+        if (door.open) {
+          // Slide up
+          if (door.slideY < WALL_H) {
+            door.slideY += dt * 4;
+            if (door.slideY > WALL_H) door.slideY = WALL_H;
+          }
+        } else {
+          // Slide down
+          if (door.slideY > 0) {
+            door.slideY -= dt * 3;
+            if (door.slideY < 0) door.slideY = 0;
+          }
+        }
+        door.mesh.position.y = WALL_H / 2 + door.slideY;
+      }
+    }
+
     // ==================== ANIMATION LOOP ====================
 
     const clock = new THREE.Clock();
@@ -749,6 +899,7 @@
       const dt = Math.min(clock.getDelta(), 0.05);
 
       movePlayer(dt);
+      animateDoors(dt);
 
       // Flicker torches
       const t = performance.now() * 0.001;
