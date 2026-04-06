@@ -830,7 +830,7 @@
     const clock = new THREE.Clock();
 
     function animate() {
-      requestAnimationFrame(animate);
+      setTimeout(animate, 1000 / 60);
       const dt = Math.min(clock.getDelta(), 0.05);
 
       movePlayer(dt);
