@@ -96,7 +96,7 @@ function generateRoomDungeon(maze, wallTextureMap, doorCells, mazeH, mazeW) {
   // Track which open cells are corridor (not room interior)
   const corridorSet = new Set();
 
-  // ---- Phase 2: Place rooms ----
+  // ---- Phase 1: Place rooms ----
   const rooms = [];
   for (let att = 0; att < ATTEMPTS && rooms.length < MAX_ROOMS; att++) {
     const w = randOdd(MIN_ROOM, MAX_ROOM);
@@ -119,14 +119,12 @@ function generateRoomDungeon(maze, wallTextureMap, doorCells, mazeH, mazeW) {
     rooms.push({ id: rooms.length, x1, y1, x2, y2, texIdx });
   }
 
-  // Carve rooms and mark wall ring
+  // ---- Phase 2: Carve rooms and mark wall ring ----
   for (const rm of rooms) {
-    // Carve interior
     for (let r = rm.y1; r <= rm.y2; r++)
       for (let c = rm.x1; c <= rm.x2; c++)
         maze[r][c] = CELL_OPEN;
 
-    // Mark wall ring with room texture
     for (let r = rm.y1 - 1; r <= rm.y2 + 1; r++) {
       for (let c = rm.x1 - 1; c <= rm.x2 + 1; c++) {
         if (r >= 0 && r < mazeH && c >= 0 && c < mazeW && maze[r][c] === CELL_WALL) {
@@ -137,8 +135,110 @@ function generateRoomDungeon(maze, wallTextureMap, doorCells, mazeH, mazeW) {
     }
   }
 
-  // ---- Phase 3: Connect rooms via MST + L-shaped corridors ----
-  // Prim's MST on room centers
+  // ---- Phase 3: Place corridor anchors (1-4 per room) ----
+  // Each anchor = a CELL_DOOR on the wall ring + a CELL_OPEN cell just outside
+  const anchors = []; // { roomId, doorR, doorC, anchorR, anchorC, used }
+  // Track wall cells that support doors — must not be carved by anchors or corridors
+  const protectedWalls = new Set();
+
+  function addDoorProtection(doorR, doorC, vertical) {
+    if (vertical) {
+      // Vertical door (N/S): wall supports to east and west
+      if (doorC > 0) protectedWalls.add(doorR * mazeW + (doorC - 1));
+      if (doorC < mazeW - 1) protectedWalls.add(doorR * mazeW + (doorC + 1));
+    } else {
+      // Horizontal door (E/W): wall supports to north and south
+      if (doorR > 0) protectedWalls.add((doorR - 1) * mazeW + doorC);
+      if (doorR < mazeH - 1) protectedWalls.add((doorR + 1) * mazeW + doorC);
+    }
+  }
+
+  for (const rm of rooms) {
+    const numExits = randInt(1, 4);
+    const placed = []; // [{doorR, doorC}] to check adjacency
+
+    for (let ei = 0; ei < numExits; ei++) {
+      // Collect all valid wall-ring positions for an exit
+      const candidates = [];
+
+      // North wall (row = y1-1, cols = x1..x2)
+      for (let c = rm.x1; c <= rm.x2; c++) {
+        const dr = rm.y1 - 1, ar = rm.y1 - 2;
+        if (ar >= 0 && maze[ar][c] === CELL_WALL)
+          candidates.push({ doorR: dr, doorC: c, anchorR: ar, anchorC: c });
+      }
+      // South wall
+      for (let c = rm.x1; c <= rm.x2; c++) {
+        const dr = rm.y2 + 1, ar = rm.y2 + 2;
+        if (ar < mazeH && maze[ar][c] === CELL_WALL)
+          candidates.push({ doorR: dr, doorC: c, anchorR: ar, anchorC: c });
+      }
+      // West wall
+      for (let r = rm.y1; r <= rm.y2; r++) {
+        const dc = rm.x1 - 1, ac = rm.x1 - 2;
+        if (ac >= 0 && maze[r][ac] === CELL_WALL)
+          candidates.push({ doorR: r, doorC: dc, anchorR: r, anchorC: ac });
+      }
+      // East wall
+      for (let r = rm.y1; r <= rm.y2; r++) {
+        const dc = rm.x2 + 1, ac = rm.x2 + 2;
+        if (ac < mazeW && maze[r][ac] === CELL_WALL)
+          candidates.push({ doorR: r, doorC: dc, anchorR: r, anchorC: ac });
+      }
+
+      // Filter out candidates that conflict with existing exits
+      const valid = candidates.filter(c => {
+        // Not adjacent to already-placed exits on this room
+        if (placed.some(p =>
+          Math.abs(c.doorR - p.doorR) + Math.abs(c.doorC - p.doorC) <= 1
+        )) return false;
+
+        // Anchor/door must not land on a protected wall cell
+        if (protectedWalls.has(c.anchorR * mazeW + c.anchorC)) return false;
+        if (protectedWalls.has(c.doorR * mazeW + c.doorC)) return false;
+
+        // The door's wall supports must currently be walls
+        const vert = (c.doorR === rm.y1 - 1 || c.doorR === rm.y2 + 1);
+        if (vert) {
+          // Vertical door needs walls east and west
+          const wOk = c.doorC > 0 && maze[c.doorR][c.doorC - 1] === CELL_WALL;
+          const eOk = c.doorC < mazeW - 1 && maze[c.doorR][c.doorC + 1] === CELL_WALL;
+          if (!wOk || !eOk) return false;
+        } else {
+          // Horizontal door needs walls north and south
+          const nOk = c.doorR > 0 && maze[c.doorR - 1][c.doorC] === CELL_WALL;
+          const sOk = c.doorR < mazeH - 1 && maze[c.doorR + 1][c.doorC] === CELL_WALL;
+          if (!nOk || !sOk) return false;
+        }
+
+        return true;
+      });
+
+      if (valid.length === 0) break; // can't place more exits
+
+      const pick = valid[Math.floor(Math.random() * valid.length)];
+      placed.push(pick);
+
+      // Determine door orientation: vertical if door is north/south of room
+      const vertical = (pick.doorR === rm.y1 - 1 || pick.doorR === rm.y2 + 1);
+
+      maze[pick.doorR][pick.doorC] = CELL_DOOR;
+      maze[pick.anchorR][pick.anchorC] = CELL_OPEN;
+      corridorSet.add(pick.anchorR * mazeW + pick.anchorC);
+
+      doorCells.push({ r: pick.doorR, c: pick.doorC, vertical });
+      addDoorProtection(pick.doorR, pick.doorC, vertical);
+
+      anchors.push({
+        roomId: rm.id,
+        doorR: pick.doorR, doorC: pick.doorC,
+        anchorR: pick.anchorR, anchorC: pick.anchorC,
+        used: false,
+      });
+    }
+  }
+
+  // ---- Phase 4: MST on room centers + extra edges ----
   const centers = rooms.map(rm => ({
     r: Math.floor((rm.y1 + rm.y2) / 2),
     c: Math.floor((rm.x1 + rm.x2) / 2)
@@ -146,62 +246,101 @@ function generateRoomDungeon(maze, wallTextureMap, doorCells, mazeH, mazeW) {
 
   const inMST = new Uint8Array(rooms.length);
   const mstEdges = [];
-  inMST[0] = 1;
-  while (mstEdges.length < rooms.length - 1) {
-    let bestD = Infinity, bestI = -1, bestJ = -1;
-    for (let i = 0; i < rooms.length; i++) {
-      if (!inMST[i]) continue;
-      for (let j = 0; j < rooms.length; j++) {
-        if (inMST[j]) continue;
-        const d = Math.abs(centers[i].r - centers[j].r) + Math.abs(centers[i].c - centers[j].c);
-        if (d < bestD) { bestD = d; bestI = i; bestJ = j; }
+  if (rooms.length > 0) {
+    inMST[0] = 1;
+    while (mstEdges.length < rooms.length - 1) {
+      let bestD = Infinity, bestI = -1, bestJ = -1;
+      for (let i = 0; i < rooms.length; i++) {
+        if (!inMST[i]) continue;
+        for (let j = 0; j < rooms.length; j++) {
+          if (inMST[j]) continue;
+          const d = Math.abs(centers[i].r - centers[j].r) + Math.abs(centers[i].c - centers[j].c);
+          if (d < bestD) { bestD = d; bestI = i; bestJ = j; }
+        }
+      }
+      if (bestJ === -1) break;
+      inMST[bestJ] = 1;
+      mstEdges.push([bestI, bestJ]);
+    }
+
+    // Add 1-2 extra edges for loops
+    for (let extra = 0; extra < 2; extra++) {
+      const i = randInt(0, rooms.length - 1);
+      let j = randInt(0, rooms.length - 2);
+      if (j >= i) j++;
+      if (!mstEdges.some(([a, b]) => (a === i && b === j) || (a === j && b === i))) {
+        mstEdges.push([i, j]);
       }
     }
-    if (bestJ === -1) break;
-    inMST[bestJ] = 1;
-    mstEdges.push([bestI, bestJ]);
   }
 
-  // Add 1-2 extra edges for loops
-  for (let extra = 0; extra < 2; extra++) {
-    const i = randInt(0, rooms.length - 1);
-    let j = randInt(0, rooms.length - 2);
-    if (j >= i) j++;
-    if (!mstEdges.some(([a, b]) => (a === i && b === j) || (a === j && b === i))) {
-      mstEdges.push([i, j]);
+  // ---- Phase 5: Pathfind corridors between anchor pairs ----
+  // BFS that can carve through unowned walls, avoiding rooms, room walls, and door supports
+  function corridorBFS(sr, sc, er, ec) {
+    const dist = Array.from({ length: mazeH }, () => new Int32Array(mazeW).fill(-1));
+    const prev = Array.from({ length: mazeH }, () => new Array(mazeW).fill(null));
+    dist[sr][sc] = 0;
+    const queue = [[sr, sc]];
+    while (queue.length) {
+      const [cr, cc] = queue.shift();
+      if (cr === er && cc === ec) break;
+      for (const [dr, dc] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+        const nr = cr + dr, nc = cc + dc;
+        if (nr < 0 || nr >= mazeH || nc < 0 || nc >= mazeW) continue;
+        if (dist[nr][nc] !== -1) continue;
+        // Can only pass through unowned wall cells, or open cells that are corridor/anchors
+        const cell = maze[nr][nc];
+        const owner = roomWall[nr][nc];
+        if (owner !== -1) continue; // room wall — impassable
+        if (protectedWalls.has(nr * mazeW + nc) && cell === CELL_WALL) continue; // door support
+        if (cell === CELL_OPEN || cell === CELL_DOOR) {
+          // Already-carved corridor or anchor — passable
+        } else if (cell === CELL_WALL) {
+          // Unowned wall — passable (will be carved)
+        } else {
+          continue; // room interior (START/EXIT treated as room interior)
+        }
+        dist[nr][nc] = dist[cr][cc] + 1;
+        prev[nr][nc] = [cr, cc];
+        queue.push([nr, nc]);
+      }
     }
-  }
-
-  // Carve L-shaped corridors (only carve through walls of the two connected rooms)
-  function carveCell(r, c, allowedRooms) {
-    if (r < 0 || r >= mazeH || c < 0 || c >= mazeW) return;
-    if (maze[r][c] === CELL_OPEN) return; // already open
-    // Skip walls belonging to rooms we're not connecting
-    const owner = roomWall[r][c];
-    if (owner !== -1 && !allowedRooms.has(owner)) return;
-    maze[r][c] = CELL_OPEN;
-    corridorSet.add(r * mazeW + c);
-  }
-
-  function carveH(row, c1, c2, allowed) {
-    const lo = Math.min(c1, c2), hi = Math.max(c1, c2);
-    for (let c = lo; c <= hi; c++) carveCell(row, c, allowed);
-  }
-  function carveV(col, r1, r2, allowed) {
-    const lo = Math.min(r1, r2), hi = Math.max(r1, r2);
-    for (let r = lo; r <= hi; r++) carveCell(r, col, allowed);
+    if (dist[er][ec] === -1) return null; // no path
+    // Reconstruct path
+    const path = [];
+    let cur = [er, ec];
+    while (cur) {
+      path.push(cur);
+      cur = prev[cur[0]][cur[1]];
+    }
+    return path;
   }
 
   for (const [i, j] of mstEdges) {
-    const a = centers[i], b = centers[j];
-    const allowed = new Set([i, j]);
-    if (Math.random() < 0.5) {
-      carveH(a.r, a.c, b.c, allowed);
-      carveV(b.c, a.r, b.r, allowed);
-    } else {
-      carveV(a.c, a.r, b.r, allowed);
-      carveH(b.r, a.c, b.c, allowed);
+    // Find closest unused anchor pair between rooms i and j
+    let bestDist = Infinity, bestA = null, bestB = null;
+    for (const a of anchors) {
+      if (a.roomId !== i || a.used) continue;
+      for (const b of anchors) {
+        if (b.roomId !== j || b.used) continue;
+        const d = Math.abs(a.anchorR - b.anchorR) + Math.abs(a.anchorC - b.anchorC);
+        if (d < bestDist) { bestDist = d; bestA = a; bestB = b; }
+      }
     }
+    if (!bestA || !bestB) continue; // no available anchors
+
+    const path = corridorBFS(bestA.anchorR, bestA.anchorC, bestB.anchorR, bestB.anchorC);
+    if (!path) continue; // no path found, skip
+
+    // Carve the corridor path
+    for (const [r, c] of path) {
+      if (maze[r][c] === CELL_WALL) {
+        maze[r][c] = CELL_OPEN;
+        corridorSet.add(r * mazeW + c);
+      }
+    }
+    bestA.used = true;
+    bestB.used = true;
   }
 
   // Mark corridor-adjacent walls with corridor texture (if not already room wall)
@@ -215,25 +354,7 @@ function generateRoomDungeon(maze, wallTextureMap, doorCells, mazeH, mazeW) {
     }
   }
 
-  // ---- Phase 4: Place doors at room entrances ----
-  const doorSet = new Set();
-  for (const rm of rooms) {
-    for (let r = rm.y1; r <= rm.y2; r++) {
-      for (let c = rm.x1; c <= rm.x2; c++) {
-        for (const [dr, dc] of [[0,1],[0,-1],[1,0],[-1,0]]) {
-          const nr = r + dr, nc = c + dc;
-          const key = nr * mazeW + nc;
-          if (corridorSet.has(key) && !doorSet.has(key)) {
-            doorSet.add(key);
-            doorCells.push({ r: nr, c: nc, vertical: (dr !== 0) });
-          }
-        }
-      }
-    }
-  }
-  for (const d of doorCells) maze[d.r][d.c] = CELL_DOOR;
-
-  // ---- Phase 5: Columns inside rooms ----
+  // ---- Phase 6: Columns inside rooms ----
   for (const rm of rooms) {
     const iw = rm.x2 - rm.x1 + 1, ih = rm.y2 - rm.y1 + 1;
     if (iw < 5 || ih < 5) continue;
@@ -249,7 +370,7 @@ function generateRoomDungeon(maze, wallTextureMap, doorCells, mazeH, mazeW) {
     }
   }
 
-  // ---- Phase 6: Start & exit (two most distant rooms) ----
+  // ---- Phase 7: Start & exit (two most distant rooms) ----
   let maxDist = 0, sIdx = 0, eIdx = 0;
   for (let i = 0; i < rooms.length; i++) {
     const dist = bfsFrom(maze, mazeH, mazeW, centers[i].r, centers[i].c);
@@ -262,7 +383,7 @@ function generateRoomDungeon(maze, wallTextureMap, doorCells, mazeH, mazeW) {
   maze[startR][startC] = CELL_START;
   maze[centers[eIdx].r][centers[eIdx].c] = CELL_EXIT;
 
-  // ---- Phase 7: Default texture for unassigned walls ----
+  // ---- Phase 8: Default texture for unassigned walls ----
   for (let r = 0; r < mazeH; r++)
     for (let c = 0; c < mazeW; c++)
       if (wallTextureMap[r][c] === -1) wallTextureMap[r][c] = CORRIDOR_TEX;
@@ -341,29 +462,49 @@ export class Maze {
 /**
  * Generate a maze.
  * @param {'rooms'|'classic'} mode
- * @returns {Maze}
+ * @returns {Maze|null} null if room generation fails after max retries
  */
 export function generateMaze(mode) {
   const MAZE_W = mode === 'rooms' ? 41 : 21;
   const MAZE_H = mode === 'rooms' ? 41 : 21;
+  const maxRetries = mode === 'rooms' ? 10 : 1;
 
-  const cells = [];
-  for (let i = 0; i < MAZE_H; i++) {
-    cells.push(new Uint8Array(MAZE_W).fill(CELL_WALL));
-  }
-  const wallTextureMap = [];
-  for (let r = 0; r < MAZE_H; r++) {
-    wallTextureMap.push(new Array(MAZE_W).fill(-1));
-  }
-  const doorCells = [];
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const cells = [];
+    for (let i = 0; i < MAZE_H; i++) {
+      cells.push(new Uint8Array(MAZE_W).fill(CELL_WALL));
+    }
+    const wallTextureMap = [];
+    for (let r = 0; r < MAZE_H; r++) {
+      wallTextureMap.push(new Array(MAZE_W).fill(-1));
+    }
+    const doorCells = [];
 
-  let startR, startC;
-  if (mode === 'rooms') {
-    ({ startR, startC } = generateRoomDungeon(cells, wallTextureMap, doorCells, MAZE_H, MAZE_W));
-  } else {
-    ({ startR, startC } = generateClassicMaze(cells, wallTextureMap, doorCells, MAZE_H, MAZE_W, NUM_WALL_TEXTURES));
+    let startR, startC;
+    if (mode === 'rooms') {
+      ({ startR, startC } = generateRoomDungeon(cells, wallTextureMap, doorCells, MAZE_H, MAZE_W));
+    } else {
+      ({ startR, startC } = generateClassicMaze(cells, wallTextureMap, doorCells, MAZE_H, MAZE_W, NUM_WALL_TEXTURES));
+    }
+
+    const doors = doorCells.map(d => ({ row: d.r, col: d.c, vertical: d.vertical }));
+    const maze = new Maze(cells, wallTextureMap, doors, startR, startC);
+
+    // Reachability check for room mode
+    if (mode === 'rooms') {
+      let exitR = -1, exitC = -1;
+      for (let r = 0; r < MAZE_H; r++)
+        for (let c = 0; c < MAZE_W; c++)
+          if (cells[r][c] === CELL_EXIT) { exitR = r; exitC = c; }
+
+      if (exitR === -1) continue; // no exit placed
+
+      const dist = bfsFrom(cells, MAZE_H, MAZE_W, startR, startC);
+      if (dist[exitR][exitC] === -1) continue; // exit unreachable, retry
+    }
+
+    return maze;
   }
 
-  const doors = doorCells.map(d => ({ row: d.r, col: d.c, vertical: d.vertical }));
-  return new Maze(cells, wallTextureMap, doors, startR, startC);
+  return null; // all retries failed
 }
