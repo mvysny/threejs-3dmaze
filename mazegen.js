@@ -275,18 +275,70 @@ function generateRoomDungeon(maze, wallTextureMap, doorCells, mazeH, mazeW) {
 const NUM_WALL_TEXTURES = 6;
 
 /**
+ * Result of maze generation. All 2D arrays are indexed as [row][col], where
+ * row corresponds to the Z axis (north/south) and col to the X axis (east/west).
+ */
+export class Maze {
+  /**
+   * 2D cell grid, `height` rows x `width` columns. Each element is one of the
+   * CELL_* constants: CELL_OPEN (0), CELL_WALL (1), CELL_START (2),
+   * CELL_EXIT (3), or CELL_DOOR (4).
+   *
+   * Mutable — the game writes to it when doors open/close.
+   * @type {Uint8Array[]}
+   */
+  cells;
+
+  /**
+   * Per-cell wall texture index, same dimensions as `cells`.
+   * Only meaningful for CELL_WALL cells; values are indices into the wall
+   * texture array used by the renderer (0–5).
+   * @type {number[][]}
+   */
+  wallTextureMap;
+
+  /**
+   * Doors placed in the maze. Each entry describes one door:
+   * - `row`, `col` — position in the grid (matches `cells[row][col]`)
+   * - `vertical` — if true the door spans the X axis (blocks north/south
+   *   movement); if false it spans the Z axis (blocks east/west movement)
+   * @type {{row: number, col: number, vertical: boolean}[]}
+   */
+  doors;
+
+  /** Row of the player start cell. */
+  startRow;
+
+  /** Column of the player start cell. */
+  startCol;
+
+  /** Number of columns (X extent). Derived from `cells[0].length`. */
+  get width() { return this.cells[0].length; }
+
+  /** Number of rows (Z extent). Derived from `cells.length`. */
+  get height() { return this.cells.length; }
+
+  constructor(cells, wallTextureMap, doors, startRow, startCol) {
+    this.cells = cells;
+    this.wallTextureMap = wallTextureMap;
+    this.doors = doors;
+    this.startRow = startRow;
+    this.startCol = startCol;
+  }
+}
+
+/**
  * Generate a maze.
  * @param {'rooms'|'classic'} mode
- * @returns {{ maze: Uint8Array[], wallTextureMap: number[][], doorCells: {r,c,vertical}[],
- *             startR: number, startC: number, MAZE_W: number, MAZE_H: number }}
+ * @returns {Maze}
  */
 export function generateMaze(mode) {
   const MAZE_W = mode === 'rooms' ? 41 : 21;
   const MAZE_H = mode === 'rooms' ? 41 : 21;
 
-  const maze = [];
+  const cells = [];
   for (let i = 0; i < MAZE_H; i++) {
-    maze.push(new Uint8Array(MAZE_W).fill(CELL_WALL));
+    cells.push(new Uint8Array(MAZE_W).fill(CELL_WALL));
   }
   const wallTextureMap = [];
   for (let r = 0; r < MAZE_H; r++) {
@@ -296,10 +348,11 @@ export function generateMaze(mode) {
 
   let startR, startC;
   if (mode === 'rooms') {
-    ({ startR, startC } = generateRoomDungeon(maze, wallTextureMap, doorCells, MAZE_H, MAZE_W));
+    ({ startR, startC } = generateRoomDungeon(cells, wallTextureMap, doorCells, MAZE_H, MAZE_W));
   } else {
-    ({ startR, startC } = generateClassicMaze(maze, wallTextureMap, doorCells, MAZE_H, MAZE_W, NUM_WALL_TEXTURES));
+    ({ startR, startC } = generateClassicMaze(cells, wallTextureMap, doorCells, MAZE_H, MAZE_W, NUM_WALL_TEXTURES));
   }
 
-  return { maze, wallTextureMap, doorCells, startR, startC, MAZE_W, MAZE_H };
+  const doors = doorCells.map(d => ({ row: d.r, col: d.c, vertical: d.vertical }));
+  return new Maze(cells, wallTextureMap, doors, startR, startC);
 }
