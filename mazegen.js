@@ -325,6 +325,17 @@ export class Maze {
     this.startRow = startRow;
     this.startCol = startCol;
   }
+
+  /**
+   * Render the maze as ASCII art for debugging.
+   * Legend: # = wall, . = open, S = start, E = exit, D = door
+   */
+  toString() {
+    const charMap = ['.', '#', 'S', 'E', 'D'];
+    return this.cells.map(row =>
+      Array.from(row, v => charMap[v] ?? '?').join('')
+    ).join('\n');
+  }
 }
 
 /**
