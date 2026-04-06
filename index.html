@@ -115,7 +115,7 @@
   </script>
   <script type="module">
     import * as THREE from 'three';
-    import { generateMaze } from './mazegen.js';
+    import { generateMaze, CELL_OPEN, CELL_WALL, CELL_START, CELL_EXIT, CELL_DOOR } from './mazegen.js';
 
     // ==================== TEXTURE GENERATION ====================
 
@@ -454,7 +454,7 @@
 
     for (let r = 0; r < MAZE_H; r++) {
       for (let c = 0; c < MAZE_W; c++) {
-        if (maze[r][c] === 1) {
+        if (maze[r][c] === CELL_WALL) {
           const texIdx = wallTextureMap[r][c];
           const x = c * CELL + CELL / 2;
           const z = r * CELL + CELL / 2;
@@ -536,7 +536,7 @@
     let exitX, exitZ;
     for (let r = 0; r < MAZE_H; r++) {
       for (let c = 0; c < MAZE_W; c++) {
-        if (maze[r][c] === 3) {
+        if (maze[r][c] === CELL_EXIT) {
           exitX = c * CELL + CELL / 2;
           exitZ = r * CELL + CELL / 2;
         }
@@ -568,7 +568,7 @@
       ];
       for (const d of dirs) {
         const nr = er + d.dr, nc = ec + d.dc;
-        if (nr >= 0 && nr < MAZE_H && nc >= 0 && nc < MAZE_W && maze[nr][nc] === 1) {
+        if (nr >= 0 && nr < MAZE_H && nc >= 0 && nc < MAZE_W && maze[nr][nc] === CELL_WALL) {
           const signGeo = new THREE.PlaneGeometry(CELL * 0.8, CELL * 0.5);
           const signMat = new THREE.MeshBasicMaterial({ map: texExit, transparent: true });
           const sign = new THREE.Mesh(signGeo, signMat);
@@ -602,7 +602,7 @@
     const torchStep = genMode === 'rooms' ? 6 : 4;
     for (let r = 1; r < MAZE_H - 1; r += torchStep) {
       for (let c = 1; c < MAZE_W - 1; c += torchStep) {
-        if (maze[r][c] !== 1) {
+        if (maze[r][c] !== CELL_WALL) {
           const tx = c * CELL + CELL / 2;
           const tz = r * CELL + CELL / 2;
           const torch = new THREE.PointLight(0xff6622, 2.0, CELL * 7);
@@ -626,11 +626,11 @@
       mmCtx.fillRect(0, 0, minimapCanvas.width, minimapCanvas.height);
       for (let r = 0; r < MAZE_H; r++) {
         for (let c = 0; c < MAZE_W; c++) {
-          if (maze[r][c] === 1) {
+          if (maze[r][c] === CELL_WALL) {
             mmCtx.fillStyle = '#444';
-          } else if (maze[r][c] === 4) {
+          } else if (maze[r][c] === CELL_DOOR) {
             mmCtx.fillStyle = '#864';
-          } else if (maze[r][c] === 3) {
+          } else if (maze[r][c] === CELL_EXIT) {
             mmCtx.fillStyle = '#0f0';
           } else {
             continue;
@@ -696,7 +696,7 @@
       const c = Math.floor(wx / CELL);
       const r = Math.floor(wz / CELL);
       if (r < 0 || r >= MAZE_H || c < 0 || c >= MAZE_W) return true;
-      return maze[r][c] === 1 || maze[r][c] === 4; // walls and closed doors
+      return maze[r][c] === CELL_WALL || maze[r][c] === CELL_DOOR;
     }
 
     function canMove(x, z) {
@@ -787,7 +787,7 @@
         if (dist < interactDist) {
           door.open = true;
           door.openTime = performance.now();
-          maze[door.r][door.c] = 0; // remove collision
+          maze[door.r][door.c] = CELL_OPEN; // remove collision
           return;
         }
       }
@@ -804,7 +804,7 @@
           const pr = Math.floor(camera.position.z / CELL);
           if (pc !== door.c || pr !== door.r) {
             door.open = false;
-            maze[door.r][door.c] = 4; // restore collision
+            maze[door.r][door.c] = CELL_DOOR; // restore collision
           }
         }
 

@@ -3,6 +3,13 @@
 // Pure-logic maze generator — no DOM, no Three.js.
 // Used by both 3dmaze.html (browser) and tests (Node).
 
+// Cell types in the maze grid
+export const CELL_OPEN = 0;
+export const CELL_WALL = 1;
+export const CELL_START = 2;
+export const CELL_EXIT = 3;
+export const CELL_DOOR = 4;
+
 const CORRIDOR_TEX = 2; // texDarkStone index for corridors
 
 // ---- BFS helper: returns 2-D distance map from (sr, sc) ----
@@ -14,7 +21,7 @@ export function bfsFrom(maze, mazeH, mazeW, sr, sc) {
     const [cr, cc] = queue.shift();
     for (const [dr, dc] of [[0,1],[0,-1],[1,0],[-1,0]]) {
       const nr = cr + dr, nc = cc + dc;
-      if (nr >= 0 && nr < mazeH && nc >= 0 && nc < mazeW && maze[nr][nc] !== 1 && dist[nr][nc] === -1) {
+      if (nr >= 0 && nr < mazeH && nc >= 0 && nc < mazeW && maze[nr][nc] !== CELL_WALL && dist[nr][nc] === -1) {
         dist[nr][nc] = dist[cr][cc] + 1;
         queue.push([nr, nc]);
       }
@@ -27,39 +34,39 @@ export function bfsFrom(maze, mazeH, mazeW, sr, sc) {
 
 function generateClassicMaze(maze, wallTextureMap, doorCells, mazeH, mazeW, numWallTextures) {
   const passageCells = [];
-  maze[1][1] = 0;
+  maze[1][1] = CELL_OPEN;
   const stack = [[1, 1]];
 
   while (stack.length) {
     const [r, c] = stack[stack.length - 1];
     const dirs = [[0,2],[0,-2],[2,0],[-2,0]].filter(([dr, dc]) => {
       const nr = r + dr, nc = c + dc;
-      return nr > 0 && nr < mazeH - 1 && nc > 0 && nc < mazeW - 1 && maze[nr][nc] === 1;
+      return nr > 0 && nr < mazeH - 1 && nc > 0 && nc < mazeW - 1 && maze[nr][nc] === CELL_WALL;
     });
     if (dirs.length === 0) { stack.pop(); continue; }
     const [dr, dc] = dirs[Math.floor(Math.random() * dirs.length)];
     const br = r + dr / 2, bc = c + dc / 2;
-    maze[br][bc] = 0;
-    maze[r + dr][c + dc] = 0;
+    maze[br][bc] = CELL_OPEN;
+    maze[r + dr][c + dc] = CELL_OPEN;
     passageCells.push({ r: br, c: bc, vertical: dr !== 0 });
     stack.push([r + dr, c + dc]);
   }
 
   // Start & exit
   const startR = 1, startC = 1;
-  maze[1][1] = 2;
+  maze[1][1] = CELL_START;
   const dist = bfsFrom(maze, mazeH, mazeW, 1, 1);
   let bestR = 1, bestC = 1, bestDist = 0;
   for (let r = 0; r < mazeH; r++)
     for (let c = 0; c < mazeW; c++)
       if (dist[r][c] > bestDist) { bestDist = dist[r][c]; bestR = r; bestC = c; }
-  maze[bestR][bestC] = 3;
+  maze[bestR][bestC] = CELL_EXIT;
 
   // Doors: ~30% of passages
   for (const d of passageCells) {
     if (Math.random() < 0.3 && !(d.r === 1 && d.c === 1)) {
       doorCells.push(d);
-      maze[d.r][d.c] = 4;
+      maze[d.r][d.c] = CELL_DOOR;
     }
   }
 
@@ -117,12 +124,12 @@ function generateRoomDungeon(maze, wallTextureMap, doorCells, mazeH, mazeW) {
     // Carve interior
     for (let r = rm.y1; r <= rm.y2; r++)
       for (let c = rm.x1; c <= rm.x2; c++)
-        maze[r][c] = 0;
+        maze[r][c] = CELL_OPEN;
 
     // Mark wall ring with room texture
     for (let r = rm.y1 - 1; r <= rm.y2 + 1; r++) {
       for (let c = rm.x1 - 1; c <= rm.x2 + 1; c++) {
-        if (r >= 0 && r < mazeH && c >= 0 && c < mazeW && maze[r][c] === 1) {
+        if (r >= 0 && r < mazeH && c >= 0 && c < mazeW && maze[r][c] === CELL_WALL) {
           wallTextureMap[r][c] = rm.texIdx;
           roomWall[r][c] = rm.id;
         }
@@ -168,11 +175,11 @@ function generateRoomDungeon(maze, wallTextureMap, doorCells, mazeH, mazeW) {
   // Carve L-shaped corridors (only carve through walls of the two connected rooms)
   function carveCell(r, c, allowedRooms) {
     if (r < 0 || r >= mazeH || c < 0 || c >= mazeW) return;
-    if (maze[r][c] === 0) return; // already open
+    if (maze[r][c] === CELL_OPEN) return; // already open
     // Skip walls belonging to rooms we're not connecting
     const owner = roomWall[r][c];
     if (owner !== -1 && !allowedRooms.has(owner)) return;
-    maze[r][c] = 0;
+    maze[r][c] = CELL_OPEN;
     corridorSet.add(r * mazeW + c);
   }
 
@@ -202,7 +209,7 @@ function generateRoomDungeon(maze, wallTextureMap, doorCells, mazeH, mazeW) {
     const cr = Math.floor(key / mazeW), cc = key % mazeW;
     for (const [dr, dc] of [[0,1],[0,-1],[1,0],[-1,0]]) {
       const nr = cr + dr, nc = cc + dc;
-      if (nr >= 0 && nr < mazeH && nc >= 0 && nc < mazeW && maze[nr][nc] === 1 && roomWall[nr][nc] === -1) {
+      if (nr >= 0 && nr < mazeH && nc >= 0 && nc < mazeW && maze[nr][nc] === CELL_WALL && roomWall[nr][nc] === -1) {
         wallTextureMap[nr][nc] = CORRIDOR_TEX;
       }
     }
@@ -224,7 +231,7 @@ function generateRoomDungeon(maze, wallTextureMap, doorCells, mazeH, mazeW) {
       }
     }
   }
-  for (const d of doorCells) maze[d.r][d.c] = 4;
+  for (const d of doorCells) maze[d.r][d.c] = CELL_DOOR;
 
   // ---- Phase 5: Columns inside rooms ----
   for (const rm of rooms) {
@@ -235,7 +242,7 @@ function generateRoomDungeon(maze, wallTextureMap, doorCells, mazeH, mazeW) {
     for (let r = rm.y1 + 2; r <= rm.y2 - 2; r += 2) {
       for (let c = rm.x1 + 2; c <= rm.x2 - 2; c += 2) {
         if (Math.random() < COLUMN_CHANCE) {
-          maze[r][c] = 1;
+          maze[r][c] = CELL_WALL;
           wallTextureMap[r][c] = cTexIdx;
         }
       }
@@ -252,8 +259,8 @@ function generateRoomDungeon(maze, wallTextureMap, doorCells, mazeH, mazeW) {
     }
   }
   const startR = centers[sIdx].r, startC = centers[sIdx].c;
-  maze[startR][startC] = 2;
-  maze[centers[eIdx].r][centers[eIdx].c] = 3;
+  maze[startR][startC] = CELL_START;
+  maze[centers[eIdx].r][centers[eIdx].c] = CELL_EXIT;
 
   // ---- Phase 7: Default texture for unassigned walls ----
   for (let r = 0; r < mazeH; r++)
@@ -277,10 +284,9 @@ export function generateMaze(mode) {
   const MAZE_W = mode === 'rooms' ? 41 : 21;
   const MAZE_H = mode === 'rooms' ? 41 : 21;
 
-  // 0 = open, 1 = wall, 2 = start, 3 = exit, 4 = closed door
   const maze = [];
   for (let i = 0; i < MAZE_H; i++) {
-    maze.push(new Uint8Array(MAZE_W).fill(1));
+    maze.push(new Uint8Array(MAZE_W).fill(CELL_WALL));
   }
   const wallTextureMap = [];
   for (let r = 0; r < MAZE_H; r++) {

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateMaze, bfsFrom } from './mazegen.js';
+import { generateMaze, bfsFrom, CELL_START, CELL_EXIT } from './mazegen.js';
 
 /**
  * Find the grid coordinates of a cell with the given value.
@@ -21,7 +21,7 @@ for (const mode of ['classic', 'rooms']) {
       for (let i = 0; i < 20; i++) {
         const { maze, startR, startC, MAZE_W, MAZE_H } = generateMaze(mode);
 
-        const exit = findCell(maze, MAZE_H, MAZE_W, 3);
+        const exit = findCell(maze, MAZE_H, MAZE_W, CELL_EXIT);
         assert.notEqual(exit, null, `iteration ${i}: no exit cell found`);
 
         const dist = bfsFrom(maze, MAZE_H, MAZE_W, startR, startC);
@@ -36,8 +36,8 @@ for (const mode of ['classic', 'rooms']) {
         let starts = 0, exits = 0;
         for (let r = 0; r < MAZE_H; r++)
           for (let c = 0; c < MAZE_W; c++) {
-            if (maze[r][c] === 2) starts++;
-            if (maze[r][c] === 3) exits++;
+            if (maze[r][c] === CELL_START) starts++;
+            if (maze[r][c] === CELL_EXIT) exits++;
           }
         assert.equal(starts, 1, `iteration ${i}: expected 1 start, got ${starts}`);
         assert.equal(exits, 1, `iteration ${i}: expected 1 exit, got ${exits}`);
