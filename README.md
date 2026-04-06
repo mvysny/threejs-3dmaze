@@ -2,6 +2,8 @@
 
 A first-person 3D dungeon crawler built with Three.js. Navigate through procedurally generated mazes, open doors, and find the green exit to escape.
 
+**[Play it now](https://mvysny.github.io/threejs-3dmaze/)**
+
 Two generator modes are available:
 - **Rooms & Corridors** — rectangular rooms connected by L-shaped corridors via minimum spanning tree
 - **Classic Maze** — recursive backtracker producing long winding passages
