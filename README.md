@@ -8,13 +8,13 @@ Two generator modes are available:
 
 ## Running the game
 
-Serve the project directory over HTTP and open `3dmaze.html` in a browser. For example:
+Serve the project directory over HTTP. For example:
 
 ```sh
 npx serve .
 ```
 
-Then visit `http://localhost:3000/3dmaze.html`.
+Then visit `http://localhost:3000`.
 
 ### Controls
 
