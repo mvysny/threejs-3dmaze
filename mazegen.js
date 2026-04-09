@@ -10,6 +10,7 @@ export const CELL_START = 2;
 export const CELL_EXIT = 3;
 export const CELL_DOOR = 4;
 export const CELL_GOLD_DOOR = 5;
+export const CELL_SECRET_DOOR = 6;
 
 const CORRIDOR_TEX = 2; // texDarkStone index for corridors
 
@@ -344,6 +345,16 @@ function generateRoomDungeon(maze, wallTextureMap, doorCells, mazeH, mazeW) {
     bestB.used = true;
   }
 
+  // ---- Phase 5b: Convert unused-anchor doors to secret doors ----
+  for (const a of anchors) {
+    if (a.used) continue;
+    const d = doorCells.find(d => d.r === a.doorR && d.c === a.doorC);
+    if (d && maze[a.doorR][a.doorC] === CELL_DOOR) {
+      maze[a.doorR][a.doorC] = CELL_SECRET_DOOR;
+      d.secret = true;
+    }
+  }
+
   // Mark corridor-adjacent walls with corridor texture (if not already room wall)
   for (const key of corridorSet) {
     const cr = Math.floor(key / mazeW), cc = key % mazeW;
@@ -453,7 +464,8 @@ export class Maze {
    * - `vertical` — if true the door spans the X axis (blocks north/south
    *   movement); if false it spans the Z axis (blocks east/west movement)
    * - `gold` — if true this is a golden door requiring a key to open
-   * @type {{row: number, col: number, vertical: boolean, gold: boolean}[]}
+   * - `secret` — if true this is a secret door disguised as a wall
+   * @type {{row: number, col: number, vertical: boolean, gold: boolean, secret: boolean}[]}
    */
   doors;
 
@@ -485,7 +497,7 @@ export class Maze {
    * Legend: # = wall, . = open, S = start, E = exit, D = door, G = gold door
    */
   toString() {
-    const charMap = ['.', '#', 'S', 'E', 'D', 'G'];
+    const charMap = ['.', '#', 'S', 'E', 'D', 'G', '#'];
     return this.cells.map(row =>
       Array.from(row, v => charMap[v] ?? '?').join('')
     ).join('\n');
@@ -525,7 +537,7 @@ export function generateMaze(mode) {
       ({ startR, startC } = generateClassicMaze(cells, wallTextureMap, doorCells, MAZE_H, MAZE_W, NUM_WALL_TEXTURES));
     }
 
-    const doors = doorCells.map(d => ({ row: d.r, col: d.c, vertical: d.vertical, gold: !!d.gold }));
+    const doors = doorCells.map(d => ({ row: d.r, col: d.c, vertical: d.vertical, gold: !!d.gold, secret: !!d.secret }));
     const maze = new Maze(cells, wallTextureMap, doors, startR, startC, genRooms, startRoomIdx, exitRoomIdx);
 
     // Reachability check for room mode

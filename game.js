@@ -1,4 +1,4 @@
-import { CELL_OPEN, CELL_WALL, CELL_DOOR, CELL_GOLD_DOOR, CELL_START, bfsFrom } from './mazegen.js';
+import { CELL_OPEN, CELL_WALL, CELL_DOOR, CELL_GOLD_DOOR, CELL_SECRET_DOOR, CELL_START, bfsFrom } from './mazegen.js';
 
 export const CELL = 4;
 export const WALL_H = 4;
@@ -52,6 +52,7 @@ export class GameState {
       col: d.col,
       vertical: d.vertical,
       gold: !!d.gold,
+      secret: !!d.secret,
       open: false,
       openTime: 0,
       slideY: 0,
@@ -99,7 +100,7 @@ export class GameState {
     const r = Math.floor(wz / CELL);
     if (r < 0 || r >= this.mazeH || c < 0 || c >= this.mazeW) return true;
     const cell = this.maze[r][c];
-    return cell === CELL_WALL || cell === CELL_DOOR || cell === CELL_GOLD_DOOR;
+    return cell === CELL_WALL || cell === CELL_DOOR || cell === CELL_GOLD_DOOR || cell === CELL_SECRET_DOOR;
   }
 
   canMove(x, z) {
@@ -273,13 +274,15 @@ export class GameState {
 
     for (let i = 0; i < this.doors.length; i++) {
       const door = this.doors[i];
-      const prevCollision = door.slideY >= WALL_H;
+      // Secret doors stop slightly below WALL_H to stay visible at the ceiling
+      const slideTarget = door.secret ? WALL_H - 0.1 : WALL_H;
+      const prevCollision = door.slideY >= slideTarget;
 
-      const closedCell = door.gold ? CELL_GOLD_DOOR : CELL_DOOR;
+      const closedCell = door.secret ? CELL_SECRET_DOOR : door.gold ? CELL_GOLD_DOOR : CELL_DOOR;
 
       // Auto-close after timeout (only if player is not underneath)
-      // Gold doors stay open permanently once unlocked
-      if (!door.gold && door.open && door.slideY >= WALL_H && now - door.openTime > DOOR_OPEN_DURATION) {
+      // Gold doors and secret doors stay open permanently once unlocked
+      if (!door.gold && !door.secret && door.open && door.slideY >= slideTarget && now - door.openTime > DOOR_OPEN_DURATION) {
         if (pc !== door.col || pr !== door.row) {
           door.open = false;
           this.maze[door.row][door.col] = closedCell;
@@ -287,9 +290,9 @@ export class GameState {
       }
 
       if (door.open) {
-        if (door.slideY < WALL_H) {
+        if (door.slideY < slideTarget) {
           door.slideY += dt * 4;
-          if (door.slideY > WALL_H) door.slideY = WALL_H;
+          if (door.slideY > slideTarget) door.slideY = slideTarget;
         }
       } else {
         if (door.slideY > 0) {
@@ -299,13 +302,13 @@ export class GameState {
       }
 
       // Update collision
-      if (door.slideY >= WALL_H) {
+      if (door.slideY >= slideTarget) {
         this.maze[door.row][door.col] = CELL_OPEN;
       } else {
         this.maze[door.row][door.col] = closedCell;
       }
 
-      const nowCollision = door.slideY >= WALL_H;
+      const nowCollision = door.slideY >= slideTarget;
       if (prevCollision !== nowCollision) changed.push(i);
     }
     return changed;

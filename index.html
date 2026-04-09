@@ -125,7 +125,7 @@
       <p>WASD to move</p>
       <p>Arrow keys to look around</p>
       <p>M to toggle minimap</p>
-      <p>SPACE to open doors</p>
+      <p>SPACE to open doors (some walls hide secret doors!)</p>
       <p>Find the <span style="color:#4f4">GREEN EXIT</span> to escape!</p>
       <p style="margin-top:20px">
         <label style="color:#aaa">Generator:
@@ -165,7 +165,7 @@
   </script>
   <script type="module">
     import * as THREE from 'three';
-    import { generateMaze, CELL_OPEN, CELL_WALL, CELL_START, CELL_EXIT, CELL_DOOR, CELL_GOLD_DOOR } from './mazegen.js';
+    import { generateMaze, CELL_OPEN, CELL_WALL, CELL_START, CELL_EXIT, CELL_DOOR, CELL_GOLD_DOOR, CELL_SECRET_DOOR } from './mazegen.js';
     import { GameState, CELL, WALL_H, PLAYER_RADIUS, INVENTORY_SIZE, ITEM_DEFS, DOOR_OPEN_DURATION } from './game.js';
 
     // ==================== TEXTURE GENERATION ====================
@@ -761,12 +761,21 @@
     for (const d of game.doors) {
       const x = d.col * CELL + CELL / 2;
       const z = d.row * CELL + CELL / 2;
-      const doorGeo = new THREE.BoxGeometry(
-        d.vertical ? CELL : 0.15,
-        WALL_H,
-        d.vertical ? 0.15 : CELL
-      );
-      const mesh = new THREE.Mesh(doorGeo, d.gold ? goldDoorMat : doorMat);
+      let doorGeo, mat;
+      if (d.secret) {
+        // Secret door: full cell size, same texture as surrounding wall
+        doorGeo = new THREE.BoxGeometry(CELL, WALL_H, CELL);
+        const texIdx = wallTextureMap[d.row][d.col];
+        mat = new THREE.MeshStandardMaterial({ map: wallTextures[texIdx >= 0 ? texIdx : 0], roughness: 0.9, metalness: 0.05 });
+      } else {
+        doorGeo = new THREE.BoxGeometry(
+          d.vertical ? CELL : 0.15,
+          WALL_H,
+          d.vertical ? 0.15 : CELL
+        );
+        mat = d.gold ? goldDoorMat : doorMat;
+      }
+      const mesh = new THREE.Mesh(doorGeo, mat);
       mesh.position.set(x, WALL_H / 2, z);
       scene.add(mesh);
       doorMeshes.push(mesh);
@@ -897,7 +906,7 @@
       mmCtx.fillRect(0, 0, minimapCanvas.width, minimapCanvas.height);
       for (let r = 0; r < MAZE_H; r++) {
         for (let c = 0; c < MAZE_W; c++) {
-          if (maze[r][c] === CELL_WALL) {
+          if (maze[r][c] === CELL_WALL || maze[r][c] === CELL_SECRET_DOOR) {
             mmCtx.fillStyle = '#444';
           } else if (maze[r][c] === CELL_DOOR) {
             mmCtx.fillStyle = '#864';
