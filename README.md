@@ -30,5 +30,5 @@ Then visit `http://localhost:3000`.
 Tests use the Node.js built-in test runner (no dependencies required, Node 18+):
 
 ```sh
-node --test mazegen.test.js
+node --test '*.test.js'
 ```

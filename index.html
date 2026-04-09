@@ -165,6 +165,7 @@
   <script type="module">
     import * as THREE from 'three';
     import { generateMaze, CELL_OPEN, CELL_WALL, CELL_START, CELL_EXIT, CELL_DOOR } from './mazegen.js';
+    import { GameState, CELL, WALL_H, PLAYER_RADIUS, INVENTORY_SIZE, ITEM_DEFS, DOOR_OPEN_DURATION } from './game.js';
 
     // ==================== TEXTURE GENERATION ====================
 
@@ -502,8 +503,7 @@
     const MAZE_W = mazeData.width;
     const MAZE_H = mazeData.height;
 
-    const CELL = 4;
-    const WALL_H = 4;
+    const game = new GameState(mazeData);
 
     // ==================== SCENE SETUP ====================
 
@@ -618,15 +618,8 @@
     scene.add(new THREE.Mesh(ceilGeo, ceilMat));
 
     // Exit marker
-    let exitX, exitZ;
-    for (let r = 0; r < MAZE_H; r++) {
-      for (let c = 0; c < MAZE_W; c++) {
-        if (maze[r][c] === CELL_EXIT) {
-          exitX = c * CELL + CELL / 2;
-          exitZ = r * CELL + CELL / 2;
-        }
-      }
-    }
+    const exitX = game.exitX;
+    const exitZ = game.exitZ;
 
     // Exit glow on floor
     const exitGlowGeo = new THREE.PlaneGeometry(CELL * 0.9, CELL * 0.9);
@@ -665,78 +658,46 @@
     }
     placeExitSigns();
 
-    // ==================== ITEMS & INVENTORY ====================
+    // ==================== WORLD ITEMS (3D) ====================
+    const itemMeshes = []; // parallel to game.worldItems: { mesh, light }
 
-    // Item definitions - type string -> display info
-    const ITEM_DEFS = {
-      golden_key: { name: 'Golden Key', icon: '🗝' },
-    };
-
-    const INVENTORY_SIZE = 10;
-    const player = {
-      health: 100,
-      inventory: new Array(INVENTORY_SIZE).fill(null), // each slot: null or item type string
-    };
-
-    function addToInventory(type) {
-      const slot = player.inventory.indexOf(null);
-      if (slot === -1) return false; // full
-      player.inventory[slot] = type;
-      return true;
-    }
-
-    // ==================== WORLD ITEMS ====================
-    const worldItems = []; // { mesh, light, type, pickupRadius }
-
-    function spawnWorldItem(type, wx, wz) {
-      const def = ITEM_DEFS[type];
-      if (!def) return;
+    function createItemMesh(type) {
       const group = new THREE.Group();
-
       if (type === 'golden_key') {
-        // Key shaft
-        const shaft = new THREE.Mesh(
-          new THREE.BoxGeometry(0.08, 0.6, 0.08),
-          new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.9, roughness: 0.2 })
-        );
+        const mat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.9, roughness: 0.2 });
+        const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.6, 0.08), mat);
         shaft.position.y = 0.3;
         group.add(shaft);
-        // Key bow (ring at top)
-        const bow = new THREE.Mesh(
-          new THREE.TorusGeometry(0.15, 0.04, 8, 16),
-          new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.9, roughness: 0.2 })
-        );
+        const bow = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.04, 8, 16), mat);
         bow.position.y = 0.65;
         group.add(bow);
-        // Key teeth
         for (let i = 0; i < 2; i++) {
-          const tooth = new THREE.Mesh(
-            new THREE.BoxGeometry(0.12, 0.06, 0.06),
-            new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.9, roughness: 0.2 })
-          );
+          const tooth = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.06, 0.06), mat);
           tooth.position.set(0.06, 0.08 + i * 0.12, 0);
           group.add(tooth);
         }
       }
+      return group;
+    }
 
+    function spawnWorldItem(type, wx, wz) {
+      game.spawnItem(type, wx, wz);
+      const group = createItemMesh(type);
       group.position.set(wx, 0.2, wz);
       scene.add(group);
-
-      // Glow light
       const light = new THREE.PointLight(0xffd700, 1.5, CELL * 3);
       light.position.set(wx, 0.8, wz);
       scene.add(light);
-
-      worldItems.push({ mesh: group, light, type, pickupRadius: CELL * 0.5 });
+      itemMeshes.push({ mesh: group, light });
     }
 
     // Place a golden key in the starting room
     spawnWorldItem('golden_key', startC * CELL + CELL / 2 + 1, startR * CELL + CELL / 2 + 1);
 
-    // Build door meshes (portcullis style)
-    const doors = [];
+    // Build door meshes (portcullis style) — parallel to game.doors
+    const doorMeshes = [];
     const doorMat = new THREE.MeshStandardMaterial({ map: texPortcullis, roughness: 0.4, metalness: 0.7 });
-    for (const d of doorCells) {
+    for (const d of game.doors) {
       const x = d.col * CELL + CELL / 2;
       const z = d.row * CELL + CELL / 2;
       const doorGeo = new THREE.BoxGeometry(
@@ -747,7 +708,7 @@
       const mesh = new THREE.Mesh(doorGeo, doorMat);
       mesh.position.set(x, WALL_H / 2, z);
       scene.add(mesh);
-      doors.push({ mesh, row: d.row, col: d.col, vertical: d.vertical, open: false, slideY: 0 });
+      doorMeshes.push(mesh);
     }
 
     // Torch lights scattered through maze
@@ -909,10 +870,7 @@
     // ==================== PLAYER CONTROLS ====================
 
     const keys = {};
-    let yaw = 0; // horizontal look angle
-    let gameStarted = false;
-    let gameWon = false;
-    let startTime = 0;
+    let yaw = 0;
 
     // Build inventory slot elements
     const inventorySlotsEl = document.getElementById('inventory-slots');
@@ -924,12 +882,10 @@
     }
 
     function updateHUD() {
-      // Health
-      document.getElementById('health-value').textContent = player.health;
-      // Inventory slots
+      document.getElementById('health-value').textContent = game.player.health;
       const slots = inventorySlotsEl.children;
       for (let i = 0; i < INVENTORY_SIZE; i++) {
-        const type = player.inventory[i];
+        const type = game.player.inventory[i];
         const def = type ? ITEM_DEFS[type] : null;
         if (def) {
           slots[i].textContent = def.icon || '?';
@@ -944,16 +900,14 @@
     }
 
     function startGame() {
-      if (gameStarted || gameWon) return;
+      if (!game.startGame(performance.now())) return;
       document.getElementById('overlay').style.display = 'none';
-      gameStarted = true;
-      startTime = performance.now();
     }
 
     document.addEventListener('keydown', e => {
       keys[e.code] = true;
       if (e.code === 'Space') {
-        if (!gameStarted) startGame();
+        if (!game.gameStarted) startGame();
         else tryOpenDoor();
       }
       if (e.code === 'KeyM') {
@@ -967,38 +921,18 @@
       startGame();
     });
 
-    // Collision detection
-    const PLAYER_RADIUS = 0.5;
-
-    function isWall(wx, wz) {
-      const c = Math.floor(wx / CELL);
-      const r = Math.floor(wz / CELL);
-      if (r < 0 || r >= MAZE_H || c < 0 || c >= MAZE_W) return true;
-      return maze[r][c] === CELL_WALL || maze[r][c] === CELL_DOOR;
-    }
-
-    function canMove(x, z) {
-      // Check the four corners of the player's bounding circle
-      return !isWall(x - PLAYER_RADIUS, z - PLAYER_RADIUS) &&
-             !isWall(x + PLAYER_RADIUS, z - PLAYER_RADIUS) &&
-             !isWall(x - PLAYER_RADIUS, z + PLAYER_RADIUS) &&
-             !isWall(x + PLAYER_RADIUS, z + PLAYER_RADIUS);
-    }
-
     function movePlayer(dt) {
-      if (!gameStarted || gameWon) return;
+      if (!game.gameStarted || game.gameWon) return;
 
       // Arrow keys rotate the view
       const turnSpeed = 2.5 * dt;
       if (keys['ArrowLeft']) yaw += turnSpeed;
       if (keys['ArrowRight']) yaw -= turnSpeed;
 
-      // Arrow up/down for slight vertical look
       let pitch = 0;
       if (keys['ArrowUp']) pitch = 0.3;
       if (keys['ArrowDown']) pitch = -0.3;
 
-      // Apply yaw and pitch to camera
       camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
 
       const speed = 8 * dt;
@@ -1018,10 +952,10 @@
       const newZ = camera.position.z + dz;
 
       // Slide along walls
-      if (canMove(newX, camera.position.z)) {
+      if (game.canMove(newX, camera.position.z)) {
         camera.position.x = newX;
       }
-      if (canMove(camera.position.x, newZ)) {
+      if (game.canMove(camera.position.x, newZ)) {
         camera.position.z = newZ;
       }
 
@@ -1035,28 +969,22 @@
       playerLight2.position.set(camera.position.x, WALL_H * 0.8, camera.position.z);
 
       // Check item pickups
-      for (let i = worldItems.length - 1; i >= 0; i--) {
-        const item = worldItems[i];
-        const dist = Math.hypot(camera.position.x - item.mesh.position.x, camera.position.z - item.mesh.position.z);
-        if (dist < item.pickupRadius) {
-          if (addToInventory(item.type)) {
-            scene.remove(item.mesh);
-            scene.remove(item.light);
-            worldItems.splice(i, 1);
-          }
-        }
+      const pickedUp = game.checkPickups(camera.position.x, camera.position.z);
+      for (const idx of pickedUp) {
+        const im = itemMeshes[idx];
+        scene.remove(im.mesh);
+        scene.remove(im.light);
+        itemMeshes.splice(idx, 1);
       }
 
       // Check win condition
-      const distToExit = Math.hypot(camera.position.x - exitX, camera.position.z - exitZ);
-      if (distToExit < CELL * 0.6) {
+      if (game.checkWin(camera.position.x, camera.position.z)) {
         winGame();
       }
     }
 
     function winGame() {
-      gameWon = true;
-      const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
+      const elapsed = ((performance.now() - game.startTime) / 1000).toFixed(1);
       document.getElementById('win-time').textContent = `Time: ${elapsed} seconds`;
       document.getElementById('win-screen').style.display = 'flex';
       document.exitPointerLock();
@@ -1065,59 +993,17 @@
     // ==================== DOOR INTERACTION ====================
 
     function tryOpenDoor() {
-      if (!gameStarted || gameWon) return;
-      const px = camera.position.x;
-      const pz = camera.position.z;
-      const interactDist = CELL * 1.8;
-
-      for (const door of doors) {
-        if (door.open) continue;
-        const dx = (door.col * CELL + CELL / 2) - px;
-        const dz = (door.row * CELL + CELL / 2) - pz;
-        const dist = Math.sqrt(dx * dx + dz * dz);
-        if (dist < interactDist) {
-          door.open = true;
-          door.openTime = performance.now();
-          return;
-        }
+      const idx = game.tryOpenDoor(camera.position.x, camera.position.z);
+      if (idx >= 0) {
+        game.setDoorOpenTime(idx, performance.now());
       }
     }
 
-    const DOOR_OPEN_DURATION = 3000; // ms before auto-close
-
     function animateDoors(dt) {
       const now = performance.now();
-      for (const door of doors) {
-        // Auto-close after timeout (only if player is not underneath)
-        if (door.open && door.slideY >= WALL_H && now - door.openTime > DOOR_OPEN_DURATION) {
-          const pc = Math.floor(camera.position.x / CELL);
-          const pr = Math.floor(camera.position.z / CELL);
-          if (pc !== door.col || pr !== door.row) {
-            door.open = false;
-            maze[door.row][door.col] = CELL_DOOR; // restore collision
-          }
-        }
-
-        if (door.open) {
-          // Slide up
-          if (door.slideY < WALL_H) {
-            door.slideY += dt * 4;
-            if (door.slideY > WALL_H) door.slideY = WALL_H;
-          }
-        } else {
-          // Slide down
-          if (door.slideY > 0) {
-            door.slideY -= dt * 3;
-            if (door.slideY < 0) door.slideY = 0;
-          }
-        }
-        // Only allow walking through when fully open
-        if (door.slideY >= WALL_H) {
-          maze[door.row][door.col] = CELL_OPEN;
-        } else {
-          maze[door.row][door.col] = CELL_DOOR;
-        }
-        door.mesh.position.y = WALL_H / 2 + door.slideY;
+      game.updateDoors(dt, now, camera.position.x, camera.position.z);
+      for (let i = 0; i < game.doors.length; i++) {
+        doorMeshes[i].position.y = WALL_H / 2 + game.doors[i].slideY;
       }
     }
 
@@ -1154,10 +1040,10 @@
       }
 
       // Animate world items (bob + rotate)
-      for (const item of worldItems) {
-        item.mesh.position.y = 0.5 + Math.sin(t * 3) * 0.15;
-        item.mesh.rotation.y = t * 2;
-        item.light.intensity = 1.5 + Math.sin(t * 4) * 0.5;
+      for (const im of itemMeshes) {
+        im.mesh.position.y = 0.5 + Math.sin(t * 3) * 0.15;
+        im.mesh.rotation.y = t * 2;
+        im.light.intensity = 1.5 + Math.sin(t * 4) * 0.5;
       }
 
       // Pulse exit glow
@@ -1165,8 +1051,8 @@
       exitLight.intensity = 0.8 + Math.sin(t * 2) * 0.4;
 
       // Update HUD
-      if (gameStarted && !gameWon) {
-        const elapsed = ((performance.now() - startTime) / 1000).toFixed(0);
+      if (game.gameStarted && !game.gameWon) {
+        const elapsed = game.getElapsedTime(performance.now());
         document.getElementById('hud-timer').textContent = `Time: ${elapsed}s`;
         updateHUD();
       }

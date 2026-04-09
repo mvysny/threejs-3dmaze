@@ -15,19 +15,18 @@ npx serve .
 
 **Run tests:**
 ```sh
-node --test mazegen.test.js
+node --test '*.test.js'
 ```
 
 Tests use Node.js built-in test runner (node:test) — no external dependencies.
 
 ## Architecture
 
-Two files contain all the code:
-
 - **`mazegen.js`** — Pure maze generation module (no DOM/Three.js dependency). Exports `Maze` class and `generateMaze(mode)` function. Two generation modes:
   - `'classic'` — 21×21 recursive backtracker maze
   - `'rooms'` — 41×41 rooms-and-corridors algorithm (room placement → MST connectivity → BFS corridor carving → door/column placement)
-- **`index.html`** — Everything else: Three.js scene setup, procedural texture generation (canvas 2D), player movement/collision, door mechanics, minimap, and game loop. Imports from mazegen.js.
+- **`game.js`** — Game logic module (no DOM/Three.js dependency). Exports `GameState` class managing player state (health, inventory), collision detection, world item pickups, door open/close logic, and win condition. Also exports constants (`CELL`, `WALL_H`, `ITEM_DEFS`, etc.).
+- **`index.html`** — Three.js rendering, procedural texture generation (canvas 2D), camera/movement, 3D mesh creation, HUD/minimap, and game loop. Imports from mazegen.js and game.js.
 
 ### Maze grid
 
