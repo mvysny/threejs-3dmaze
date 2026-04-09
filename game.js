@@ -112,7 +112,7 @@ export class GameState {
     return this.worldItems.length - 1; // return index for mesh mapping
   }
 
-  /** Check pickups; returns array of picked-up item indices (caller removes meshes). */
+  /** Check pickups; returns array of { index, type } for picked-up items (caller removes meshes). */
   checkPickups(playerX, playerZ) {
     const pickedUp = [];
     for (let i = this.worldItems.length - 1; i >= 0; i--) {
@@ -120,7 +120,7 @@ export class GameState {
       const dist = Math.hypot(playerX - item.wx, playerZ - item.wz);
       if (dist < item.pickupRadius) {
         if (this.addToInventory(item.type)) {
-          pickedUp.push(i);
+          pickedUp.push({ index: i, type: item.type });
           this.worldItems.splice(i, 1);
         }
       }

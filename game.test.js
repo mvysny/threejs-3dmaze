@@ -86,7 +86,9 @@ describe('world items & pickups', () => {
 
     // Player walks to the item
     const picked = g.checkPickups(sx + 0.5, sz + 0.5);
-    assert.deepEqual(picked, [0]);
+    assert.equal(picked.length, 1);
+    assert.equal(picked[0].index, 0);
+    assert.equal(picked[0].type, 'golden_key');
     assert.equal(g.worldItems.length, 0);
     assert.ok(g.hasItem('golden_key'));
   });

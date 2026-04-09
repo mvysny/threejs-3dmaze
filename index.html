@@ -46,8 +46,9 @@
       align-items: center;
       gap: 6px;
     }
-    #hud-timer {
+    #hud-notify {
       font-size: 14px;
+      min-height: 1.2em;
     }
     #hud-bar {
       display: flex;
@@ -139,7 +140,7 @@
   </div>
   <div id="crosshair">+</div>
   <div id="hud">
-    <div id="hud-timer">Find the exit...</div>
+    <div id="hud-notify"></div>
     <div id="hud-bar">
       <div id="health-display"><span class="heart">&#9829;</span><span id="health-value">100</span></div>
       <div id="inventory-slots"></div>
@@ -926,6 +927,16 @@
       mmCtx.stroke();
     }
 
+    // ==================== HUD NOTIFICATIONS ====================
+
+    const hudNotifyEl = document.getElementById('hud-notify');
+    let notifyExpire = 0;
+
+    function showNotify(text, durationMs = 3000) {
+      hudNotifyEl.textContent = text;
+      notifyExpire = performance.now() + durationMs;
+    }
+
     // ==================== PLAYER CONTROLS ====================
 
     const keys = {};
@@ -1029,11 +1040,13 @@
 
       // Check item pickups
       const pickedUp = game.checkPickups(camera.position.x, camera.position.z);
-      for (const idx of pickedUp) {
-        const im = itemMeshes[idx];
+      for (const { index, type } of pickedUp) {
+        const im = itemMeshes[index];
         scene.remove(im.mesh);
         scene.remove(im.light);
-        itemMeshes.splice(idx, 1);
+        itemMeshes.splice(index, 1);
+        const def = ITEM_DEFS[type];
+        if (def) showNotify(`You picked up a ${def.name}!`);
       }
 
       // Check win condition
@@ -1055,7 +1068,7 @@
       const result = game.tryOpenDoor(camera.position.x, camera.position.z);
       if (!result) return;
       if (result.needsKey) {
-        document.getElementById('hud-timer').textContent = 'You need a golden key!';
+        showNotify('You need a golden key!');
         return;
       }
       game.setDoorOpenTime(result.index, performance.now());
@@ -1114,8 +1127,9 @@
 
       // Update HUD
       if (game.gameStarted && !game.gameWon) {
-        const elapsed = game.getElapsedTime(performance.now());
-        document.getElementById('hud-timer').textContent = `Time: ${elapsed}s`;
+        if (performance.now() > notifyExpire) {
+          hudNotifyEl.textContent = '';
+        }
         updateHUD();
       }
 
