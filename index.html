@@ -699,7 +699,7 @@
         depthWrite: false,
       });
       const glow = new THREE.Sprite(glowMat);
-      glow.scale.set(1.8, 1.8, 1);
+      glow.scale.set(2.4, 2.4, 1);
       glow.position.set(0, 0.65, 0.28);
       group.add(glow);
 
@@ -718,13 +718,30 @@
       torchMeshes.push({ group, flames, glow });
     }
 
-    // Place a torch on the wall the player faces at start
-    // Player faces -Z (decreasing row). Walk north from start until we hit a wall.
+    // Find all wall faces adjacent to open cells (candidate torch spots)
     {
-      let wr = startR - 1;
-      while (wr >= 0 && maze[wr][startC] !== CELL_WALL) wr--;
-      if (wr >= 0) {
-        createTorchOnWall(wr, startC, wr + 1, startC);
+      const candidates = [];
+      const openTypes = [CELL_OPEN, CELL_START, CELL_EXIT];
+      for (let r = 1; r < MAZE_H - 1; r++) {
+        for (let c = 1; c < MAZE_W - 1; c++) {
+          if (maze[r][c] !== CELL_WALL) continue;
+          const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+          for (const [dr, dc] of dirs) {
+            if (openTypes.includes(maze[r + dr][c + dc])) {
+              candidates.push({ wr: r, wc: c, or: r + dr, oc: c + dc });
+            }
+          }
+        }
+      }
+      // Shuffle and pick up to 20
+      for (let i = candidates.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+      }
+      const count = Math.min(40, candidates.length);
+      for (let i = 0; i < count; i++) {
+        const { wr, wc, or: openR, oc: openC } = candidates[i];
+        createTorchOnWall(wr, wc, openR, openC);
       }
     }
 
@@ -972,7 +989,7 @@
           flame.position.y = 0.65 + Math.sin(phase * 0.9) * 0.04;
         }
         const glowPhase = t * 5;
-        const glowScale = 1.8 + Math.sin(glowPhase) * 0.2 + Math.sin(glowPhase * 2.3) * 0.1;
+        const glowScale = 2.4 + Math.sin(glowPhase) * 0.25 + Math.sin(glowPhase * 2.3) * 0.15;
         torch.glow.scale.set(glowScale, glowScale, 1);
         torch.glow.material.opacity = 0.7 + Math.sin(glowPhase * 1.7) * 0.15;
       }
