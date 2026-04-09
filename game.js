@@ -1,4 +1,4 @@
-import { CELL_OPEN, CELL_WALL, CELL_DOOR } from './mazegen.js';
+import { CELL_OPEN, CELL_WALL, CELL_DOOR, CELL_GOLD_DOOR } from './mazegen.js';
 
 export const CELL = 4;
 export const WALL_H = 4;
@@ -47,6 +47,7 @@ export class GameState {
       row: d.row,
       col: d.col,
       vertical: d.vertical,
+      gold: !!d.gold,
       open: false,
       openTime: 0,
       slideY: 0,
@@ -93,7 +94,8 @@ export class GameState {
     const c = Math.floor(wx / CELL);
     const r = Math.floor(wz / CELL);
     if (r < 0 || r >= this.mazeH || c < 0 || c >= this.mazeW) return true;
-    return this.maze[r][c] === CELL_WALL || this.maze[r][c] === CELL_DOOR;
+    const cell = this.maze[r][c];
+    return cell === CELL_WALL || cell === CELL_DOOR || cell === CELL_GOLD_DOOR;
   }
 
   canMove(x, z) {
@@ -128,8 +130,9 @@ export class GameState {
 
   // ==================== DOORS ====================
 
+  /** Try to open the nearest door. Returns { index, needsKey } or null. */
   tryOpenDoor(playerX, playerZ) {
-    if (!this.gameStarted || this.gameWon) return -1;
+    if (!this.gameStarted || this.gameWon) return null;
     const interactDist = CELL * 1.8;
     for (let i = 0; i < this.doors.length; i++) {
       const door = this.doors[i];
@@ -138,12 +141,18 @@ export class GameState {
       const dz = (door.row * CELL + CELL / 2) - playerZ;
       const dist = Math.sqrt(dx * dx + dz * dz);
       if (dist < interactDist) {
+        if (door.gold && !this.hasItem('golden_key')) {
+          return { index: i, needsKey: true };
+        }
+        if (door.gold) {
+          this.removeFromInventory('golden_key');
+        }
         door.open = true;
-        door.openTime = 0; // caller sets this via setDoorOpenTime
-        return i;
+        door.openTime = 0;
+        return { index: i, needsKey: false };
       }
     }
-    return -1;
+    return null;
   }
 
   setDoorOpenTime(doorIndex, now) {
@@ -160,11 +169,14 @@ export class GameState {
       const door = this.doors[i];
       const prevCollision = door.slideY >= WALL_H;
 
+      const closedCell = door.gold ? CELL_GOLD_DOOR : CELL_DOOR;
+
       // Auto-close after timeout (only if player is not underneath)
-      if (door.open && door.slideY >= WALL_H && now - door.openTime > DOOR_OPEN_DURATION) {
+      // Gold doors stay open permanently once unlocked
+      if (!door.gold && door.open && door.slideY >= WALL_H && now - door.openTime > DOOR_OPEN_DURATION) {
         if (pc !== door.col || pr !== door.row) {
           door.open = false;
-          this.maze[door.row][door.col] = CELL_DOOR;
+          this.maze[door.row][door.col] = closedCell;
         }
       }
 
@@ -184,7 +196,7 @@ export class GameState {
       if (door.slideY >= WALL_H) {
         this.maze[door.row][door.col] = CELL_OPEN;
       } else {
-        this.maze[door.row][door.col] = CELL_DOOR;
+        this.maze[door.row][door.col] = closedCell;
       }
 
       const nowCollision = door.slideY >= WALL_H;

@@ -9,6 +9,7 @@ export const CELL_WALL = 1;
 export const CELL_START = 2;
 export const CELL_EXIT = 3;
 export const CELL_DOOR = 4;
+export const CELL_GOLD_DOOR = 5;
 
 const CORRIDOR_TEX = 2; // texDarkStone index for corridors
 
@@ -383,6 +384,20 @@ function generateRoomDungeon(maze, wallTextureMap, doorCells, mazeH, mazeW) {
   maze[startR][startC] = CELL_START;
   maze[centers[eIdx].r][centers[eIdx].c] = CELL_EXIT;
 
+  // ---- Phase 7b: Mark exit room doors as gold ----
+  const exitRoom = rooms[eIdx];
+  for (const d of doorCells) {
+    // A door belongs to the exit room if it sits on that room's wall ring
+    const onNorth = d.r === exitRoom.y1 - 1 && d.c >= exitRoom.x1 && d.c <= exitRoom.x2;
+    const onSouth = d.r === exitRoom.y2 + 1 && d.c >= exitRoom.x1 && d.c <= exitRoom.x2;
+    const onWest  = d.c === exitRoom.x1 - 1 && d.r >= exitRoom.y1 && d.r <= exitRoom.y2;
+    const onEast  = d.c === exitRoom.x2 + 1 && d.r >= exitRoom.y1 && d.r <= exitRoom.y2;
+    if (onNorth || onSouth || onWest || onEast) {
+      maze[d.r][d.c] = CELL_GOLD_DOOR;
+      d.gold = true;
+    }
+  }
+
   // ---- Phase 8: Default texture for unassigned walls ----
   for (let r = 0; r < mazeH; r++)
     for (let c = 0; c < mazeW; c++)
@@ -423,7 +438,8 @@ export class Maze {
    * - `row`, `col` — position in the grid (matches `cells[row][col]`)
    * - `vertical` — if true the door spans the X axis (blocks north/south
    *   movement); if false it spans the Z axis (blocks east/west movement)
-   * @type {{row: number, col: number, vertical: boolean}[]}
+   * - `gold` — if true this is a golden door requiring a key to open
+   * @type {{row: number, col: number, vertical: boolean, gold: boolean}[]}
    */
   doors;
 
@@ -449,10 +465,10 @@ export class Maze {
 
   /**
    * Render the maze as ASCII art for debugging.
-   * Legend: # = wall, . = open, S = start, E = exit, D = door
+   * Legend: # = wall, . = open, S = start, E = exit, D = door, G = gold door
    */
   toString() {
-    const charMap = ['.', '#', 'S', 'E', 'D'];
+    const charMap = ['.', '#', 'S', 'E', 'D', 'G'];
     return this.cells.map(row =>
       Array.from(row, v => charMap[v] ?? '?').join('')
     ).join('\n');
@@ -487,7 +503,7 @@ export function generateMaze(mode) {
       ({ startR, startC } = generateClassicMaze(cells, wallTextureMap, doorCells, MAZE_H, MAZE_W, NUM_WALL_TEXTURES));
     }
 
-    const doors = doorCells.map(d => ({ row: d.r, col: d.c, vertical: d.vertical }));
+    const doors = doorCells.map(d => ({ row: d.r, col: d.c, vertical: d.vertical, gold: !!d.gold }));
     const maze = new Maze(cells, wallTextureMap, doors, startR, startC);
 
     // Reachability check for room mode

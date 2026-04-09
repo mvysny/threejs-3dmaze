@@ -1,6 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateMaze, bfsFrom, CELL_START, CELL_EXIT, CELL_WALL, CELL_DOOR } from './mazegen.js';
+import { generateMaze, bfsFrom, CELL_START, CELL_EXIT, CELL_WALL, CELL_DOOR, CELL_GOLD_DOOR } from './mazegen.js';
+
+function isDoor(cell) { return cell === CELL_DOOR || cell === CELL_GOLD_DOOR; }
 
 /**
  * Find the grid coordinates of a cell with the given value.
@@ -73,14 +75,14 @@ describe('rooms door validation', () => {
       // Also check: no two adjacent doors in same orientation (no wide door stretches)
       for (let r = 0; r < m.height; r++) {
         for (let c = 0; c < m.width; c++) {
-          if (m.cells[r][c] !== CELL_DOOR) continue;
+          if (!isDoor(m.cells[r][c])) continue;
           // Check right neighbor
-          if (c + 1 < m.width && m.cells[r][c + 1] === CELL_DOOR) {
+          if (c + 1 < m.width && isDoor(m.cells[r][c + 1])) {
             assert.fail(
               `iteration ${i}: adjacent doors at (${r},${c}) and (${r},${c + 1})\n${m}`);
           }
           // Check bottom neighbor
-          if (r + 1 < m.height && m.cells[r + 1][c] === CELL_DOOR) {
+          if (r + 1 < m.height && isDoor(m.cells[r + 1][c])) {
             assert.fail(
               `iteration ${i}: adjacent doors at (${r},${c}) and (${r + 1},${c})\n${m}`);
           }

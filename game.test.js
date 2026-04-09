@@ -101,33 +101,62 @@ describe('world items & pickups', () => {
 });
 
 describe('doors', () => {
+  // Find first non-gold door for basic door tests
+  function findRegularDoor(g) {
+    return g.doors.find(d => !d.gold);
+  }
+
   it('tryOpenDoor opens nearest door', () => {
     const g = makeGame();
-    if (g.doors.length === 0) return; // classic mode may not have doors
-    const door = g.doors[0];
+    const door = findRegularDoor(g);
+    if (!door) return; // no regular doors
     const dx = door.col * CELL + CELL / 2;
     const dz = door.row * CELL + CELL / 2;
     g.gameStarted = true;
-    const idx = g.tryOpenDoor(dx, dz);
-    assert.ok(idx >= 0);
-    assert.ok(g.doors[idx].open);
+    const result = g.tryOpenDoor(dx, dz);
+    assert.ok(result);
+    assert.ok(!result.needsKey);
+    assert.ok(g.doors[result.index].open);
   });
 
   it('updateDoors slides open door up', () => {
     const g = makeGame();
-    if (g.doors.length === 0) return;
+    const door = findRegularDoor(g);
+    if (!door) return;
     g.gameStarted = true;
-    const door = g.doors[0];
     const dx = door.col * CELL + CELL / 2;
     const dz = door.row * CELL + CELL / 2;
-    g.tryOpenDoor(dx, dz);
-    g.setDoorOpenTime(0, 0);
+    const result = g.tryOpenDoor(dx, dz);
+    g.setDoorOpenTime(result.index, 0);
 
     // Simulate several frames
     for (let i = 0; i < 60; i++) {
       g.updateDoors(1 / 15, 1000, 0, 0); // player far away
     }
     assert.ok(door.slideY > 0, 'door should have slid up');
+  });
+
+  it('gold door requires golden key', () => {
+    const g = makeGame();
+    const goldDoor = g.doors.find(d => d.gold);
+    if (!goldDoor) return; // no gold doors in this maze
+    const dx = goldDoor.col * CELL + CELL / 2;
+    const dz = goldDoor.row * CELL + CELL / 2;
+    g.gameStarted = true;
+
+    // Without key: should need key
+    const result1 = g.tryOpenDoor(dx, dz);
+    assert.ok(result1);
+    assert.ok(result1.needsKey);
+    assert.ok(!goldDoor.open);
+
+    // With key: should open and consume key
+    g.addToInventory('golden_key');
+    const result2 = g.tryOpenDoor(dx, dz);
+    assert.ok(result2);
+    assert.ok(!result2.needsKey);
+    assert.ok(goldDoor.open);
+    assert.ok(!g.hasItem('golden_key'), 'key should be consumed');
   });
 });
 

@@ -164,7 +164,7 @@
   </script>
   <script type="module">
     import * as THREE from 'three';
-    import { generateMaze, CELL_OPEN, CELL_WALL, CELL_START, CELL_EXIT, CELL_DOOR } from './mazegen.js';
+    import { generateMaze, CELL_OPEN, CELL_WALL, CELL_START, CELL_EXIT, CELL_DOOR, CELL_GOLD_DOOR } from './mazegen.js';
     import { GameState, CELL, WALL_H, PLAYER_RADIUS, INVENTORY_SIZE, ITEM_DEFS, DOOR_OPEN_DURATION } from './game.js';
 
     // ==================== TEXTURE GENERATION ====================
@@ -458,6 +458,62 @@
       addNoise(ctx, w, h, 0.04);
     });
 
+    // Golden portcullis for gold doors
+    const texGoldPortcullis = createTexture(128, 128, (ctx, w, h) => {
+      ctx.fillStyle = '#050508';
+      ctx.fillRect(0, 0, w, h);
+      const barW = 10, barSpacing = 22;
+      for (let x = barSpacing / 2; x < w; x += barSpacing) {
+        const grad = ctx.createLinearGradient(x - barW / 2, 0, x + barW / 2, 0);
+        grad.addColorStop(0, '#8B6914');
+        grad.addColorStop(0.2, '#D4A830');
+        grad.addColorStop(0.45, '#FFD700');
+        grad.addColorStop(0.55, '#FFE44D');
+        grad.addColorStop(0.8, '#D4A830');
+        grad.addColorStop(1, '#8B6914');
+        ctx.fillStyle = grad;
+        ctx.fillRect(x - barW / 2, 0, barW, h);
+      }
+      const crossH = 8, crossSpacing = 32;
+      for (let y = crossSpacing; y < h; y += crossSpacing) {
+        const grad = ctx.createLinearGradient(0, y - crossH / 2, 0, y + crossH / 2);
+        grad.addColorStop(0, '#8B6914');
+        grad.addColorStop(0.2, '#D4A830');
+        grad.addColorStop(0.5, '#FFD700');
+        grad.addColorStop(0.8, '#D4A830');
+        grad.addColorStop(1, '#8B6914');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, y - crossH / 2, w, crossH);
+      }
+      for (let x = barSpacing / 2; x < w; x += barSpacing) {
+        for (let y = crossSpacing; y < h; y += crossSpacing) {
+          ctx.fillStyle = '#FFE44D';
+          ctx.beginPath();
+          ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#FFFFF0';
+          ctx.beginPath();
+          ctx.arc(x - 1, y - 1, 1.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      for (let x = barSpacing / 2; x < w; x += barSpacing) {
+        ctx.fillStyle = '#D4A830';
+        ctx.beginPath();
+        ctx.moveTo(x - 6, h);
+        ctx.lineTo(x, h - 14);
+        ctx.lineTo(x + 6, h);
+        ctx.fill();
+        ctx.fillStyle = '#FFD700';
+        ctx.beginPath();
+        ctx.moveTo(x - 2, h);
+        ctx.lineTo(x, h - 12);
+        ctx.lineTo(x + 2, h);
+        ctx.fill();
+      }
+      addNoise(ctx, w, h, 0.04);
+    });
+
     // Flame texture for torches
     const texFlame = createTexture(32, 64, (ctx, w, h) => {
       ctx.clearRect(0, 0, w, h);
@@ -692,11 +748,12 @@
     }
 
     // Place a golden key in the starting room
-    spawnWorldItem('golden_key', startC * CELL + CELL / 2 + 1, startR * CELL + CELL / 2 + 1);
+    spawnWorldItem('golden_key', startC * CELL + CELL / 2, startR * CELL + CELL / 2 + CELL * 0.55);
 
     // Build door meshes (portcullis style) — parallel to game.doors
     const doorMeshes = [];
     const doorMat = new THREE.MeshStandardMaterial({ map: texPortcullis, roughness: 0.4, metalness: 0.7 });
+    const goldDoorMat = new THREE.MeshStandardMaterial({ map: texGoldPortcullis, roughness: 0.3, metalness: 0.9 });
     for (const d of game.doors) {
       const x = d.col * CELL + CELL / 2;
       const z = d.row * CELL + CELL / 2;
@@ -705,7 +762,7 @@
         WALL_H,
         d.vertical ? 0.15 : CELL
       );
-      const mesh = new THREE.Mesh(doorGeo, doorMat);
+      const mesh = new THREE.Mesh(doorGeo, d.gold ? goldDoorMat : doorMat);
       mesh.position.set(x, WALL_H / 2, z);
       scene.add(mesh);
       doorMeshes.push(mesh);
@@ -840,6 +897,8 @@
             mmCtx.fillStyle = '#444';
           } else if (maze[r][c] === CELL_DOOR) {
             mmCtx.fillStyle = '#864';
+          } else if (maze[r][c] === CELL_GOLD_DOOR) {
+            mmCtx.fillStyle = '#fd0';
           } else if (maze[r][c] === CELL_EXIT) {
             mmCtx.fillStyle = '#0f0';
           } else {
@@ -993,10 +1052,13 @@
     // ==================== DOOR INTERACTION ====================
 
     function tryOpenDoor() {
-      const idx = game.tryOpenDoor(camera.position.x, camera.position.z);
-      if (idx >= 0) {
-        game.setDoorOpenTime(idx, performance.now());
+      const result = game.tryOpenDoor(camera.position.x, camera.position.z);
+      if (!result) return;
+      if (result.needsKey) {
+        document.getElementById('hud-timer').textContent = 'You need a golden key!';
+        return;
       }
+      game.setDoorOpenTime(result.index, performance.now());
     }
 
     function animateDoors(dt) {
