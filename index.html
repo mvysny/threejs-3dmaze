@@ -41,6 +41,49 @@
       text-shadow: 1px 1px 2px #000;
       pointer-events: none;
       z-index: 5;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    #hud-timer {
+      font-size: 14px;
+    }
+    #hud-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(0,0,0,0.6);
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 4px 8px;
+    }
+    #health-display {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      color: #f44;
+      font-size: 14px;
+      min-width: 50px;
+    }
+    #health-display .heart { color: #f44; font-size: 16px; }
+    #inventory-slots {
+      display: flex;
+      gap: 3px;
+    }
+    .inv-slot {
+      width: 36px;
+      height: 36px;
+      border: 1px solid #666;
+      border-radius: 3px;
+      background: rgba(0,0,0,0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+    }
+    .inv-slot.empty {
+      border-color: #444;
     }
     #minimap {
       position: absolute;
@@ -95,7 +138,13 @@
     </div>
   </div>
   <div id="crosshair">+</div>
-  <div id="hud">Find the exit...</div>
+  <div id="hud">
+    <div id="hud-timer">Find the exit...</div>
+    <div id="hud-bar">
+      <div id="health-display"><span class="heart">&#9829;</span><span id="health-value">100</span></div>
+      <div id="inventory-slots"></div>
+    </div>
+  </div>
   <canvas id="minimap" width="1" height="1" style="display:none"></canvas>
   <div id="win-screen">
     <div class="box">
@@ -616,6 +665,74 @@
     }
     placeExitSigns();
 
+    // ==================== ITEMS & INVENTORY ====================
+
+    // Item definitions - type string -> display info
+    const ITEM_DEFS = {
+      golden_key: { name: 'Golden Key', icon: '🗝' },
+    };
+
+    const INVENTORY_SIZE = 10;
+    const player = {
+      health: 100,
+      inventory: new Array(INVENTORY_SIZE).fill(null), // each slot: null or item type string
+    };
+
+    function addToInventory(type) {
+      const slot = player.inventory.indexOf(null);
+      if (slot === -1) return false; // full
+      player.inventory[slot] = type;
+      return true;
+    }
+
+    // ==================== WORLD ITEMS ====================
+    const worldItems = []; // { mesh, light, type, pickupRadius }
+
+    function spawnWorldItem(type, wx, wz) {
+      const def = ITEM_DEFS[type];
+      if (!def) return;
+      const group = new THREE.Group();
+
+      if (type === 'golden_key') {
+        // Key shaft
+        const shaft = new THREE.Mesh(
+          new THREE.BoxGeometry(0.08, 0.6, 0.08),
+          new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.9, roughness: 0.2 })
+        );
+        shaft.position.y = 0.3;
+        group.add(shaft);
+        // Key bow (ring at top)
+        const bow = new THREE.Mesh(
+          new THREE.TorusGeometry(0.15, 0.04, 8, 16),
+          new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.9, roughness: 0.2 })
+        );
+        bow.position.y = 0.65;
+        group.add(bow);
+        // Key teeth
+        for (let i = 0; i < 2; i++) {
+          const tooth = new THREE.Mesh(
+            new THREE.BoxGeometry(0.12, 0.06, 0.06),
+            new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.9, roughness: 0.2 })
+          );
+          tooth.position.set(0.06, 0.08 + i * 0.12, 0);
+          group.add(tooth);
+        }
+      }
+
+      group.position.set(wx, 0.2, wz);
+      scene.add(group);
+
+      // Glow light
+      const light = new THREE.PointLight(0xffd700, 1.5, CELL * 3);
+      light.position.set(wx, 0.8, wz);
+      scene.add(light);
+
+      worldItems.push({ mesh: group, light, type, pickupRadius: CELL * 0.5 });
+    }
+
+    // Place a golden key in the starting room
+    spawnWorldItem('golden_key', startC * CELL + CELL / 2 + 1, startR * CELL + CELL / 2 + 1);
+
     // Build door meshes (portcullis style)
     const doors = [];
     const doorMat = new THREE.MeshStandardMaterial({ map: texPortcullis, roughness: 0.4, metalness: 0.7 });
@@ -797,6 +914,35 @@
     let gameWon = false;
     let startTime = 0;
 
+    // Build inventory slot elements
+    const inventorySlotsEl = document.getElementById('inventory-slots');
+    for (let i = 0; i < INVENTORY_SIZE; i++) {
+      const slot = document.createElement('div');
+      slot.className = 'inv-slot empty';
+      slot.dataset.index = i;
+      inventorySlotsEl.appendChild(slot);
+    }
+
+    function updateHUD() {
+      // Health
+      document.getElementById('health-value').textContent = player.health;
+      // Inventory slots
+      const slots = inventorySlotsEl.children;
+      for (let i = 0; i < INVENTORY_SIZE; i++) {
+        const type = player.inventory[i];
+        const def = type ? ITEM_DEFS[type] : null;
+        if (def) {
+          slots[i].textContent = def.icon || '?';
+          slots[i].className = 'inv-slot';
+          slots[i].title = def.name || '';
+        } else {
+          slots[i].textContent = '';
+          slots[i].className = 'inv-slot empty';
+          slots[i].title = '';
+        }
+      }
+    }
+
     function startGame() {
       if (gameStarted || gameWon) return;
       document.getElementById('overlay').style.display = 'none';
@@ -887,6 +1033,19 @@
       // Update lights
       playerLight.position.copy(camera.position);
       playerLight2.position.set(camera.position.x, WALL_H * 0.8, camera.position.z);
+
+      // Check item pickups
+      for (let i = worldItems.length - 1; i >= 0; i--) {
+        const item = worldItems[i];
+        const dist = Math.hypot(camera.position.x - item.mesh.position.x, camera.position.z - item.mesh.position.z);
+        if (dist < item.pickupRadius) {
+          if (addToInventory(item.type)) {
+            scene.remove(item.mesh);
+            scene.remove(item.light);
+            worldItems.splice(i, 1);
+          }
+        }
+      }
 
       // Check win condition
       const distToExit = Math.hypot(camera.position.x - exitX, camera.position.z - exitZ);
@@ -994,14 +1153,22 @@
         torch.glow.material.opacity = 0.7 + Math.sin(glowPhase * 1.7) * 0.15;
       }
 
+      // Animate world items (bob + rotate)
+      for (const item of worldItems) {
+        item.mesh.position.y = 0.5 + Math.sin(t * 3) * 0.15;
+        item.mesh.rotation.y = t * 2;
+        item.light.intensity = 1.5 + Math.sin(t * 4) * 0.5;
+      }
+
       // Pulse exit glow
       exitGlow.material.opacity = 0.2 + Math.sin(t * 2) * 0.15;
       exitLight.intensity = 0.8 + Math.sin(t * 2) * 0.4;
 
-      // Update HUD timer
+      // Update HUD
       if (gameStarted && !gameWon) {
         const elapsed = ((performance.now() - startTime) / 1000).toFixed(0);
-        document.getElementById('hud').textContent = `Time: ${elapsed}s`;
+        document.getElementById('hud-timer').textContent = `Time: ${elapsed}s`;
+        updateHUD();
       }
 
       drawMinimap();
