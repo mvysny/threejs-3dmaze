@@ -1,4 +1,4 @@
-import { CELL_OPEN, CELL_WALL, CELL_DOOR, CELL_GOLD_DOOR } from './mazegen.js';
+import { CELL_OPEN, CELL_WALL, CELL_DOOR, CELL_GOLD_DOOR, CELL_START, bfsFrom } from './mazegen.js';
 
 export const CELL = 4;
 export const WALL_H = 4;
@@ -12,12 +12,16 @@ export const ITEM_DEFS = {
 
 export class GameState {
   constructor(mazeData) {
-    const { cells, width, height, doors: doorCells, startRow, startCol } = mazeData;
+    const { cells, width, height, doors: doorCells, startRow, startCol,
+            rooms = [], startRoomIdx = -1, exitRoomIdx = -1 } = mazeData;
     this.maze = cells;
     this.mazeW = width;
     this.mazeH = height;
     this.startRow = startRow;
     this.startCol = startCol;
+    this.rooms = rooms;
+    this.startRoomIdx = startRoomIdx;
+    this.exitRoomIdx = exitRoomIdx;
 
     // Find exit
     this.exitX = 0;
@@ -110,6 +114,108 @@ export class GameState {
   spawnItem(type, wx, wz) {
     this.worldItems.push({ type, wx, wz, pickupRadius: CELL * 0.5 });
     return this.worldItems.length - 1; // return index for mesh mapping
+  }
+
+  /**
+   * Pick a random open, reachable cell in a room rect. Returns { row, col } or null.
+   * Avoids the exact start cell so the item isn't under the player.
+   */
+  _randomOpenCellInRoom(room, reachable) {
+    const candidates = [];
+    for (let r = room.y1; r <= room.y2; r++) {
+      for (let c = room.x1; c <= room.x2; c++) {
+        if (reachable[r][c] === -1) continue;
+        const cell = this.maze[r][c];
+        if (cell === CELL_OPEN || cell === CELL_START) {
+          if (r === this.startRow && c === this.startCol) continue;
+          candidates.push({ row: r, col: c });
+        }
+      }
+    }
+    if (candidates.length === 0) return null;
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
+  /**
+   * Find a random placement for the golden key.
+   * - Must not be in the exit room
+   * - Must be reachable from start
+   * - Prefers non-start rooms; falls back to start room if necessary
+   * - For classic mode (no rooms): picks a random reachable cell away from exit
+   * Returns { row, col } in grid coordinates, or null if placement fails.
+   */
+  findKeyPlacement() {
+    const reachable = bfsFrom(this.maze, this.mazeH, this.mazeW, this.startRow, this.startCol);
+
+    // Rooms mode
+    if (this.rooms.length > 0) {
+      const preferred = []; // non-start, non-exit rooms
+      let startRoom = null;
+
+      for (let i = 0; i < this.rooms.length; i++) {
+        if (i === this.exitRoomIdx) continue;
+        if (i === this.startRoomIdx) {
+          startRoom = this.rooms[i];
+        } else {
+          preferred.push(this.rooms[i]);
+        }
+      }
+
+      // Shuffle preferred rooms and try each
+      for (let i = preferred.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [preferred[i], preferred[j]] = [preferred[j], preferred[i]];
+      }
+
+      for (const room of preferred) {
+        const cell = this._randomOpenCellInRoom(room, reachable);
+        if (cell) return cell;
+      }
+
+      // Fall back to start room
+      if (startRoom) {
+        const cell = this._randomOpenCellInRoom(startRoom, reachable);
+        if (cell) return cell;
+      }
+
+      return null;
+    }
+
+    // Classic mode: BFS from start, pick a random reachable cell not near exit
+    const dist = bfsFrom(this.maze, this.mazeH, this.mazeW, this.startRow, this.startCol);
+    const exitRow = Math.round((this.exitZ - CELL / 2) / CELL);
+    const exitCol = Math.round((this.exitX - CELL / 2) / CELL);
+
+    const candidates = [];
+    for (let r = 0; r < this.mazeH; r++) {
+      for (let c = 0; c < this.mazeW; c++) {
+        if (dist[r][c] === -1) continue; // unreachable
+        if (r === this.startRow && c === this.startCol) continue;
+        const cell = this.maze[r][c];
+        if (cell !== CELL_OPEN && cell !== CELL_START) continue;
+        // Exclude cells near exit (within 3 grid steps)
+        const exitDist = Math.abs(r - exitRow) + Math.abs(c - exitCol);
+        if (exitDist <= 3) continue;
+        candidates.push({ row: r, col: c });
+      }
+    }
+
+    // If too restrictive, allow cells near exit but not at exit
+    if (candidates.length === 0) {
+      for (let r = 0; r < this.mazeH; r++) {
+        for (let c = 0; c < this.mazeW; c++) {
+          if (dist[r][c] === -1) continue;
+          if (r === this.startRow && c === this.startCol) continue;
+          if (r === exitRow && c === exitCol) continue;
+          const cell = this.maze[r][c];
+          if (cell !== CELL_OPEN && cell !== CELL_START) continue;
+          candidates.push({ row: r, col: c });
+        }
+      }
+    }
+
+    if (candidates.length === 0) return null;
+    return candidates[Math.floor(Math.random() * candidates.length)];
   }
 
   /** Check pickups; returns array of { index, type } for picked-up items (caller removes meshes). */

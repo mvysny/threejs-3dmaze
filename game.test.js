@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateMaze, CELL_OPEN, CELL_WALL, CELL_DOOR } from './mazegen.js';
+import { generateMaze, CELL_OPEN, CELL_WALL, CELL_DOOR, CELL_EXIT, bfsFrom } from './mazegen.js';
 import { GameState, CELL, WALL_H, INVENTORY_SIZE, ITEM_DEFS } from './game.js';
 
 function makeGame(mode = 'rooms') {
@@ -186,5 +186,75 @@ describe('game flow', () => {
     const g = makeGame();
     g.startGame(1000);
     assert.equal(g.getElapsedTime(4500), '4'); // 3.5s rounds to 4
+  });
+});
+
+describe('key placement', () => {
+  it('rooms mode: key is placed in a reachable non-exit room', () => {
+    for (let i = 0; i < 30; i++) {
+      const g = makeGame('rooms');
+      const pos = g.findKeyPlacement();
+      assert.ok(pos, `iteration ${i}: findKeyPlacement returned null`);
+
+      // Must be reachable from start
+      const dist = bfsFrom(g.maze, g.mazeH, g.mazeW, g.startRow, g.startCol);
+      assert.ok(dist[pos.row][pos.col] >= 0,
+        `iteration ${i}: key at (${pos.row},${pos.col}) is not reachable from start`);
+
+      // Must not be in exit room
+      if (g.exitRoomIdx >= 0) {
+        const exitRoom = g.rooms[g.exitRoomIdx];
+        const inExitRoom = pos.row >= exitRoom.y1 && pos.row <= exitRoom.y2 &&
+                           pos.col >= exitRoom.x1 && pos.col <= exitRoom.x2;
+        assert.ok(!inExitRoom,
+          `iteration ${i}: key at (${pos.row},${pos.col}) is inside exit room`);
+      }
+
+      // Must not be on the exact start cell
+      assert.ok(pos.row !== g.startRow || pos.col !== g.startCol,
+        `iteration ${i}: key placed on start cell`);
+    }
+  });
+
+  it('rooms mode: key prefers non-start rooms when available', () => {
+    let nonStartCount = 0;
+    const runs = 50;
+    for (let i = 0; i < runs; i++) {
+      const g = makeGame('rooms');
+      const pos = g.findKeyPlacement();
+      assert.ok(pos);
+      // Check if key is NOT in start room
+      if (g.startRoomIdx >= 0) {
+        const startRoom = g.rooms[g.startRoomIdx];
+        const inStartRoom = pos.row >= startRoom.y1 && pos.row <= startRoom.y2 &&
+                            pos.col >= startRoom.x1 && pos.col <= startRoom.x2;
+        if (!inStartRoom) nonStartCount++;
+      }
+    }
+    // With typically 10+ rooms, key should almost never land in start room
+    assert.ok(nonStartCount > runs * 0.8,
+      `key was in non-start room only ${nonStartCount}/${runs} times`);
+  });
+
+  it('classic mode: key is placed in a reachable cell away from exit', () => {
+    for (let i = 0; i < 20; i++) {
+      const g = makeGame('classic');
+      const pos = g.findKeyPlacement();
+      assert.ok(pos, `iteration ${i}: findKeyPlacement returned null`);
+
+      // Must be reachable
+      const dist = bfsFrom(g.maze, g.mazeH, g.mazeW, g.startRow, g.startCol);
+      assert.ok(dist[pos.row][pos.col] >= 0,
+        `iteration ${i}: key at (${pos.row},${pos.col}) is not reachable`);
+
+      // Must be on an open cell
+      const cell = g.maze[pos.row][pos.col];
+      assert.ok(cell === CELL_OPEN || cell === 2 /* CELL_START */,
+        `iteration ${i}: key at (${pos.row},${pos.col}) is on cell type ${cell}`);
+
+      // Must not be on exact start cell
+      assert.ok(pos.row !== g.startRow || pos.col !== g.startCol,
+        `iteration ${i}: key placed on start cell`);
+    }
   });
 });

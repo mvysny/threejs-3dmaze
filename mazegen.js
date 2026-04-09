@@ -403,7 +403,8 @@ function generateRoomDungeon(maze, wallTextureMap, doorCells, mazeH, mazeW) {
     for (let c = 0; c < mazeW; c++)
       if (wallTextureMap[r][c] === -1) wallTextureMap[r][c] = CORRIDOR_TEX;
 
-  return { startR, startC };
+  const exportRooms = rooms.map(rm => ({ x1: rm.x1, y1: rm.y1, x2: rm.x2, y2: rm.y2 }));
+  return { startR, startC, rooms: exportRooms, startRoomIdx: sIdx, exitRoomIdx: eIdx };
 }
 
 // ==================== PUBLIC API ====================
@@ -434,6 +435,19 @@ export class Maze {
   wallTextureMap;
 
   /**
+   * Room rectangles (rooms mode only; empty for classic).
+   * Each entry: { x1, y1, x2, y2 } in grid coordinates (col/row).
+   * @type {{x1: number, y1: number, x2: number, y2: number}[]}
+   */
+  rooms;
+
+  /** Index into `rooms` for the start room (-1 if no rooms). */
+  startRoomIdx;
+
+  /** Index into `rooms` for the exit room (-1 if no rooms). */
+  exitRoomIdx;
+
+  /**
    * Doors placed in the maze. Each entry describes one door:
    * - `row`, `col` — position in the grid (matches `cells[row][col]`)
    * - `vertical` — if true the door spans the X axis (blocks north/south
@@ -455,12 +469,15 @@ export class Maze {
   /** Number of rows (Z extent). Derived from `cells.length`. */
   get height() { return this.cells.length; }
 
-  constructor(cells, wallTextureMap, doors, startRow, startCol) {
+  constructor(cells, wallTextureMap, doors, startRow, startCol, rooms = [], startRoomIdx = -1, exitRoomIdx = -1) {
     this.cells = cells;
     this.wallTextureMap = wallTextureMap;
     this.doors = doors;
     this.startRow = startRow;
     this.startCol = startCol;
+    this.rooms = rooms;
+    this.startRoomIdx = startRoomIdx;
+    this.exitRoomIdx = exitRoomIdx;
   }
 
   /**
@@ -496,15 +513,20 @@ export function generateMaze(mode) {
     }
     const doorCells = [];
 
-    let startR, startC;
+    let startR, startC, genRooms = [], startRoomIdx = -1, exitRoomIdx = -1;
     if (mode === 'rooms') {
-      ({ startR, startC } = generateRoomDungeon(cells, wallTextureMap, doorCells, MAZE_H, MAZE_W));
+      const result = generateRoomDungeon(cells, wallTextureMap, doorCells, MAZE_H, MAZE_W);
+      startR = result.startR;
+      startC = result.startC;
+      genRooms = result.rooms;
+      startRoomIdx = result.startRoomIdx;
+      exitRoomIdx = result.exitRoomIdx;
     } else {
       ({ startR, startC } = generateClassicMaze(cells, wallTextureMap, doorCells, MAZE_H, MAZE_W, NUM_WALL_TEXTURES));
     }
 
     const doors = doorCells.map(d => ({ row: d.r, col: d.c, vertical: d.vertical, gold: !!d.gold }));
-    const maze = new Maze(cells, wallTextureMap, doors, startR, startC);
+    const maze = new Maze(cells, wallTextureMap, doors, startR, startC, genRooms, startRoomIdx, exitRoomIdx);
 
     // Reachability check for room mode
     if (mode === 'rooms') {

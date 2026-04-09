@@ -748,8 +748,11 @@
       itemMeshes.push({ mesh: group, light });
     }
 
-    // Place a golden key in the starting room
-    spawnWorldItem('golden_key', startC * CELL + CELL / 2, startR * CELL + CELL / 2 + CELL * 0.55);
+    // Place a golden key randomly in the maze
+    const keyPos = game.findKeyPlacement();
+    if (keyPos) {
+      spawnWorldItem('golden_key', keyPos.col * CELL + CELL / 2, keyPos.row * CELL + CELL / 2);
+    }
 
     // Build door meshes (portcullis style) — parallel to game.doors
     const doorMeshes = [];
