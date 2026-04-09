@@ -790,7 +790,6 @@
         if (dist < interactDist) {
           door.open = true;
           door.openTime = performance.now();
-          maze[door.row][door.col] = CELL_OPEN; // remove collision
           return;
         }
       }
@@ -823,6 +822,12 @@
             door.slideY -= dt * 3;
             if (door.slideY < 0) door.slideY = 0;
           }
+        }
+        // Only allow walking through when fully open
+        if (door.slideY >= WALL_H) {
+          maze[door.row][door.col] = CELL_OPEN;
+        } else {
+          maze[door.row][door.col] = CELL_DOOR;
         }
         door.mesh.position.y = WALL_H / 2 + door.slideY;
       }
