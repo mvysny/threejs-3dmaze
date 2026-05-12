@@ -3,11 +3,19 @@ import { CELL_OPEN, CELL_WALL, CELL_DOOR, CELL_GOLD_DOOR, CELL_SECRET_DOOR, CELL
 export const CELL = 4;
 export const WALL_H = 4;
 export const PLAYER_RADIUS = 0.5;
+export const ENEMY_RADIUS = 0.4;
+export const ENEMY_SPEED = 1.5; // world units per second
+export const ENEMY_TURN_MIN_MS = 1500;
+export const ENEMY_TURN_RAND_MS = 2000;
 export const INVENTORY_SIZE = 10;
 export const DOOR_OPEN_DURATION = 3000; // ms before auto-close
 
 export const ITEM_DEFS = {
   golden_key: { name: 'Golden Key', icon: '🗝' },
+};
+
+export const ENEMY_DEFS = {
+  skeleton: { name: 'Skeleton' },
 };
 
 export class GameState {
@@ -60,6 +68,9 @@ export class GameState {
 
     // World items (logic side — no mesh references)
     this.worldItems = []; // { type, wx, wz, pickupRadius }
+
+    // Enemies (logic side — no mesh references)
+    this.enemies = []; // { type, wx, wz, dirAngle, nextTurnTime }
   }
 
   startGame(now) {
@@ -104,10 +115,21 @@ export class GameState {
   }
 
   canMove(x, z) {
-    return !this.isWall(x - PLAYER_RADIUS, z - PLAYER_RADIUS) &&
-           !this.isWall(x + PLAYER_RADIUS, z - PLAYER_RADIUS) &&
-           !this.isWall(x - PLAYER_RADIUS, z + PLAYER_RADIUS) &&
-           !this.isWall(x + PLAYER_RADIUS, z + PLAYER_RADIUS);
+    if (this.isWall(x - PLAYER_RADIUS, z - PLAYER_RADIUS)) return false;
+    if (this.isWall(x + PLAYER_RADIUS, z - PLAYER_RADIUS)) return false;
+    if (this.isWall(x - PLAYER_RADIUS, z + PLAYER_RADIUS)) return false;
+    if (this.isWall(x + PLAYER_RADIUS, z + PLAYER_RADIUS)) return false;
+    if (this._anyEnemyWithin(x, z, ENEMY_RADIUS + PLAYER_RADIUS, null)) return false;
+    return true;
+  }
+
+  _anyEnemyWithin(x, z, separation, ignoreEnemy) {
+    for (const e of this.enemies) {
+      if (e === ignoreEnemy) continue;
+      const dx = x - e.wx, dz = z - e.wz;
+      if (dx * dx + dz * dz < separation * separation) return true;
+    }
+    return false;
   }
 
   // ==================== WORLD ITEMS ====================
@@ -233,6 +255,96 @@ export class GameState {
       }
     }
     return pickedUp;
+  }
+
+  // ==================== ENEMIES ====================
+
+  spawnEnemy(type, wx, wz) {
+    this.enemies.push({
+      type,
+      wx, wz,
+      dirAngle: Math.random() * Math.PI * 2,
+      nextTurnTime: 0,
+    });
+    return this.enemies.length - 1;
+  }
+
+  /**
+   * Spawn an enemy in the start room (rooms mode) or adjacent to the player
+   * start (classic mode). Avoids the exact player start cell.
+   * Returns the enemy index, or -1 if no suitable cell exists.
+   */
+  spawnEnemyInStartRoom(type) {
+    const place = this._findEnemySpawnInStartRoom();
+    if (!place) return -1;
+    return this.spawnEnemy(type, place.col * CELL + CELL / 2, place.row * CELL + CELL / 2);
+  }
+
+  _findEnemySpawnInStartRoom() {
+    if (this.startRoomIdx >= 0 && this.rooms.length > 0) {
+      const room = this.rooms[this.startRoomIdx];
+      const candidates = [];
+      for (let r = room.y1; r <= room.y2; r++) {
+        for (let c = room.x1; c <= room.x2; c++) {
+          const cell = this.maze[r][c];
+          if (cell !== CELL_OPEN && cell !== CELL_START) continue;
+          if (r === this.startRow && c === this.startCol) continue;
+          candidates.push({ row: r, col: c });
+        }
+      }
+      if (candidates.length === 0) return null;
+      return candidates[Math.floor(Math.random() * candidates.length)];
+    }
+    // Classic mode: search outward for an open cell near the start
+    const offsets = [
+      [0, 1], [0, -1], [1, 0], [-1, 0],
+      [1, 1], [1, -1], [-1, 1], [-1, -1],
+      [0, 2], [0, -2], [2, 0], [-2, 0],
+    ];
+    for (const [dr, dc] of offsets) {
+      const r = this.startRow + dr;
+      const c = this.startCol + dc;
+      if (r < 0 || r >= this.mazeH || c < 0 || c >= this.mazeW) continue;
+      const cell = this.maze[r][c];
+      if (cell === CELL_OPEN || cell === CELL_START) return { row: r, col: c };
+    }
+    return null;
+  }
+
+  /** Can an enemy occupy (x, z) given walls, the player, and other enemies? */
+  canEnemyMoveTo(x, z, self, playerX, playerZ) {
+    if (this.isWall(x - ENEMY_RADIUS, z - ENEMY_RADIUS)) return false;
+    if (this.isWall(x + ENEMY_RADIUS, z - ENEMY_RADIUS)) return false;
+    if (this.isWall(x - ENEMY_RADIUS, z + ENEMY_RADIUS)) return false;
+    if (this.isWall(x + ENEMY_RADIUS, z + ENEMY_RADIUS)) return false;
+    const dpx = x - playerX, dpz = z - playerZ;
+    const playerSep = ENEMY_RADIUS + PLAYER_RADIUS;
+    if (dpx * dpx + dpz * dpz < playerSep * playerSep) return false;
+    if (this._anyEnemyWithin(x, z, ENEMY_RADIUS * 2, self)) return false;
+    return true;
+  }
+
+  /** Slow random-wander update for all enemies. */
+  updateEnemies(dt, now, playerX, playerZ) {
+    for (const e of this.enemies) {
+      if (now >= e.nextTurnTime) {
+        e.dirAngle = Math.random() * Math.PI * 2;
+        e.nextTurnTime = now + ENEMY_TURN_MIN_MS + Math.random() * ENEMY_TURN_RAND_MS;
+      }
+      const dx = Math.cos(e.dirAngle) * ENEMY_SPEED * dt;
+      const dz = Math.sin(e.dirAngle) * ENEMY_SPEED * dt;
+      let moved = false;
+      if (this.canEnemyMoveTo(e.wx + dx, e.wz, e, playerX, playerZ)) {
+        e.wx += dx; moved = true;
+      }
+      if (this.canEnemyMoveTo(e.wx, e.wz + dz, e, playerX, playerZ)) {
+        e.wz += dz; moved = true;
+      }
+      if (!moved) {
+        // Stuck — re-pick direction on next tick
+        e.nextTurnTime = 0;
+      }
+    }
   }
 
   // ==================== DOORS ====================

@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateMaze, CELL_OPEN, CELL_WALL, CELL_DOOR, CELL_EXIT, bfsFrom } from './mazegen.js';
-import { GameState, CELL, WALL_H, INVENTORY_SIZE, ITEM_DEFS } from './game.js';
+import { GameState, CELL, WALL_H, INVENTORY_SIZE, ITEM_DEFS, ENEMY_RADIUS, PLAYER_RADIUS } from './game.js';
 
 function makeGame(mode = 'rooms') {
   return new GameState(generateMaze(mode));
@@ -186,6 +186,127 @@ describe('game flow', () => {
     const g = makeGame();
     g.startGame(1000);
     assert.equal(g.getElapsedTime(4500), '4'); // 3.5s rounds to 4
+  });
+});
+
+describe('enemies', () => {
+  function startCellCenter(g) {
+    return { x: g.startCol * CELL + CELL / 2, z: g.startRow * CELL + CELL / 2 };
+  }
+
+  it('spawnEnemy adds an enemy to the list', () => {
+    const g = makeGame();
+    const idx = g.spawnEnemy('skeleton', 10, 20);
+    assert.equal(idx, 0);
+    assert.equal(g.enemies.length, 1);
+    assert.equal(g.enemies[0].type, 'skeleton');
+    assert.equal(g.enemies[0].wx, 10);
+    assert.equal(g.enemies[0].wz, 20);
+  });
+
+  it('rooms mode: spawnEnemyInStartRoom places enemy in start room, not on player', () => {
+    for (let i = 0; i < 30; i++) {
+      const g = makeGame('rooms');
+      const idx = g.spawnEnemyInStartRoom('skeleton');
+      assert.ok(idx >= 0, `iteration ${i}: spawn failed`);
+      const e = g.enemies[idx];
+
+      const room = g.rooms[g.startRoomIdx];
+      const cx = room.x1 * CELL;
+      const cz = room.y1 * CELL;
+      const ex = (room.x2 + 1) * CELL;
+      const ez = (room.y2 + 1) * CELL;
+      assert.ok(e.wx >= cx && e.wx <= ex && e.wz >= cz && e.wz <= ez,
+        `iteration ${i}: enemy outside start room`);
+
+      const { x: sx, z: sz } = startCellCenter(g);
+      assert.ok(Math.hypot(e.wx - sx, e.wz - sz) > 0.1,
+        `iteration ${i}: enemy spawned on player start cell`);
+    }
+  });
+
+  it('classic mode: spawnEnemyInStartRoom places enemy near player start', () => {
+    for (let i = 0; i < 10; i++) {
+      const g = makeGame('classic');
+      const idx = g.spawnEnemyInStartRoom('skeleton');
+      assert.ok(idx >= 0, `iteration ${i}: spawn failed`);
+      const e = g.enemies[idx];
+      const { x: sx, z: sz } = startCellCenter(g);
+      // Within a couple of cells of start
+      assert.ok(Math.hypot(e.wx - sx, e.wz - sz) <= CELL * 2.1);
+    }
+  });
+
+  it('player canMove is blocked by an enemy', () => {
+    const g = makeGame();
+    const { x: sx, z: sz } = startCellCenter(g);
+    // Verify the space near start is initially clear
+    assert.ok(g.canMove(sx, sz));
+    g.spawnEnemy('skeleton', sx, sz);
+    assert.ok(!g.canMove(sx + 0.1, sz + 0.1),
+      'player should not be able to occupy the same spot as an enemy');
+    // Far enough away, movement is fine
+    assert.ok(g.canMove(sx + (ENEMY_RADIUS + PLAYER_RADIUS) + 0.5, sz));
+  });
+
+  it('canEnemyMoveTo blocks at walls', () => {
+    const g = makeGame();
+    // Find any wall cell in the maze
+    let wr = -1, wc = -1;
+    for (let r = 0; r < g.mazeH && wr < 0; r++) {
+      for (let c = 0; c < g.mazeW; c++) {
+        if (g.maze[r][c] === CELL_WALL) { wr = r; wc = c; break; }
+      }
+    }
+    assert.ok(wr >= 0, 'expected at least one wall in the maze');
+    const wx = wc * CELL + CELL / 2;
+    const wz = wr * CELL + CELL / 2;
+    // Far-away player so it doesn't interfere
+    assert.ok(!g.canEnemyMoveTo(wx, wz, null, -1000, -1000));
+  });
+
+  it('canEnemyMoveTo blocks when the player is in the way', () => {
+    const g = makeGame();
+    const { x: sx, z: sz } = startCellCenter(g);
+    // Open spot away from any walls: start cell itself
+    assert.ok(g.canEnemyMoveTo(sx, sz, null, sx + 100, sz + 100));
+    assert.ok(!g.canEnemyMoveTo(sx, sz, null, sx + 0.1, sz));
+  });
+
+  it('updateEnemies moves an enemy along its heading', () => {
+    const g = makeGame();
+    const { x: sx, z: sz } = startCellCenter(g);
+    g.spawnEnemy('skeleton', sx, sz);
+    const e = g.enemies[0];
+    e.dirAngle = 0; // east (+x)
+    e.nextTurnTime = 1e12; // never re-pick during this test
+    const x0 = e.wx;
+    // Player far away
+    g.updateEnemies(0.1, 0, sx + 1000, sz + 1000);
+    assert.ok(e.wx > x0, `enemy should have moved east; before=${x0} after=${e.wx}`);
+    // And heading still preserved
+    assert.equal(e.dirAngle, 0);
+  });
+
+  it('updateEnemies cannot push an enemy through the player', () => {
+    const g = makeGame();
+    const { x: sx, z: sz } = startCellCenter(g);
+    g.spawnEnemy('skeleton', sx, sz);
+    const e = g.enemies[0];
+    e.dirAngle = 0; // east
+    e.nextTurnTime = 1e12;
+    // Place the player just east of the enemy, blocking forward motion
+    const playerX = e.wx + ENEMY_RADIUS + PLAYER_RADIUS + 0.05;
+    const playerZ = e.wz;
+    const x0 = e.wx;
+    for (let i = 0; i < 20; i++) {
+      g.updateEnemies(0.1, i * 100, playerX, playerZ);
+    }
+    // Enemy should not have crossed past the player
+    assert.ok(e.wx < playerX - ENEMY_RADIUS - PLAYER_RADIUS + 0.01,
+      `enemy crossed player: enemy=${e.wx} player=${playerX}`);
+    // It also should not have moved meaningfully east
+    assert.ok(e.wx <= x0 + 0.05, `enemy moved east into the player: ${x0} -> ${e.wx}`);
   });
 });
 

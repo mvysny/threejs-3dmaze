@@ -166,7 +166,7 @@
   <script type="module">
     import * as THREE from 'three';
     import { generateMaze, CELL_OPEN, CELL_WALL, CELL_START, CELL_EXIT, CELL_DOOR, CELL_GOLD_DOOR, CELL_SECRET_DOOR } from './mazegen.js';
-    import { GameState, CELL, WALL_H, PLAYER_RADIUS, INVENTORY_SIZE, ITEM_DEFS, DOOR_OPEN_DURATION } from './game.js';
+    import { GameState, CELL, WALL_H, PLAYER_RADIUS, INVENTORY_SIZE, ITEM_DEFS, ENEMY_DEFS, DOOR_OPEN_DURATION } from './game.js';
 
     // ==================== TEXTURE GENERATION ====================
 
@@ -550,6 +550,74 @@
 
     const wallTextures = [texStoneBrick, texRedBrick, texDarkStone, texMossyStone, texWood, texMetal];
 
+    // Skeleton sprite (Wolfenstein-style billboard)
+    const texSkeleton = createTexture(64, 128, (ctx, w, h) => {
+      ctx.clearRect(0, 0, w, h);
+      const bone = '#e8e3c8';
+      const dark = '#000';
+      const cx = w / 2;
+
+      ctx.fillStyle = bone;
+      // Skull
+      ctx.beginPath();
+      ctx.ellipse(cx, 16, 11, 13, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Jaw
+      ctx.fillRect(cx - 7, 26, 14, 5);
+
+      // Eye sockets
+      ctx.fillStyle = dark;
+      ctx.fillRect(cx - 7, 13, 4, 6);
+      ctx.fillRect(cx + 3, 13, 4, 6);
+      // Nasal cavity
+      ctx.beginPath();
+      ctx.moveTo(cx, 18);
+      ctx.lineTo(cx - 2, 25);
+      ctx.lineTo(cx + 2, 25);
+      ctx.fill();
+      // Teeth gaps
+      for (let i = 0; i < 5; i++) ctx.fillRect(cx - 6 + i * 3, 28, 1, 3);
+
+      ctx.fillStyle = bone;
+      // Spine
+      ctx.fillRect(cx - 1, 33, 2, 36);
+      // Ribs
+      for (let i = 0; i < 4; i++) {
+        const y = 36 + i * 5;
+        ctx.beginPath();
+        ctx.ellipse(cx, y, 12, 3, 0, 0, Math.PI, true);
+        ctx.fill();
+      }
+      // Collarbone / shoulders
+      ctx.fillRect(cx - 14, 32, 28, 2);
+      // Upper arms
+      ctx.fillRect(cx - 16, 33, 3, 17);
+      ctx.fillRect(cx + 13, 33, 3, 17);
+      // Forearms
+      ctx.fillRect(cx - 17, 50, 3, 18);
+      ctx.fillRect(cx + 14, 50, 3, 18);
+      // Hands
+      ctx.fillRect(cx - 19, 66, 5, 6);
+      ctx.fillRect(cx + 14, 66, 5, 6);
+
+      // Pelvis
+      ctx.beginPath();
+      ctx.ellipse(cx, 71, 10, 5, 0, 0, Math.PI, false);
+      ctx.fill();
+
+      // Upper legs
+      ctx.fillRect(cx - 7, 74, 4, 22);
+      ctx.fillRect(cx + 3, 74, 4, 22);
+      // Lower legs
+      ctx.fillRect(cx - 7, 96, 4, 21);
+      ctx.fillRect(cx + 3, 96, 4, 21);
+      // Feet
+      ctx.fillRect(cx - 10, 117, 8, 5);
+      ctx.fillRect(cx + 2, 117, 8, 5);
+    });
+    texSkeleton.magFilter = THREE.NearestFilter;
+    texSkeleton.minFilter = THREE.NearestFilter;
+
     // ==================== MAZE GENERATION ====================
 
     const genMode = localStorage.getItem('gen') || 'rooms';
@@ -753,6 +821,36 @@
     if (keyPos) {
       spawnWorldItem('golden_key', keyPos.col * CELL + CELL / 2, keyPos.row * CELL + CELL / 2);
     }
+
+    // ==================== ENEMIES (3D) ====================
+    const enemyMeshes = []; // parallel to game.enemies
+
+    function createEnemyMesh(type) {
+      if (type === 'skeleton') {
+        const mat = new THREE.SpriteMaterial({
+          map: texSkeleton,
+          transparent: true,
+          alphaTest: 0.4,
+        });
+        const sprite = new THREE.Sprite(mat);
+        sprite.scale.set(1.2, 2.4, 1);
+        return sprite;
+      }
+      return null;
+    }
+
+    function spawnEnemyMesh(type) {
+      const idx = game.spawnEnemyInStartRoom(type);
+      if (idx < 0) return;
+      const e = game.enemies[idx];
+      const mesh = createEnemyMesh(type);
+      if (!mesh) return;
+      mesh.position.set(e.wx, 1.2, e.wz);
+      scene.add(mesh);
+      enemyMeshes.push(mesh);
+    }
+
+    spawnEnemyMesh('skeleton');
 
     // Build door meshes (portcullis style) — parallel to game.doors
     const doorMeshes = [];
@@ -1086,6 +1184,16 @@
       game.setDoorOpenTime(result.index, performance.now());
     }
 
+    function animateEnemies(dt) {
+      if (!game.gameStarted || game.gameWon) return;
+      game.updateEnemies(dt, performance.now(), camera.position.x, camera.position.z);
+      for (let i = 0; i < game.enemies.length; i++) {
+        const e = game.enemies[i];
+        enemyMeshes[i].position.x = e.wx;
+        enemyMeshes[i].position.z = e.wz;
+      }
+    }
+
     function animateDoors(dt) {
       const now = performance.now();
       game.updateDoors(dt, now, camera.position.x, camera.position.z);
@@ -1104,6 +1212,7 @@
 
       movePlayer(dt);
       animateDoors(dt);
+      animateEnemies(dt);
 
       // Flicker torches
       const t = performance.now() * 0.001;
